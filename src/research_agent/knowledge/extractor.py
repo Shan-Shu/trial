@@ -16,75 +16,121 @@ logger = logging.getLogger(__name__)
 
 
 SYSTEM_HINT = (
-    "你是科研知识抽取与本体构建引擎。目标是从论文中产出能合并进一个统一科研知识图谱、"
-    "便于跨文献合并的结构化知识。只抽取文中明确陈述的内容，禁止臆造。"
+    "你是科研知识抽取与本体构建引擎。你的任务是从单篇论文中抽取结构化事实，"
+    "输出可合并进统一科研知识图谱的 JSON。\n"
+    "核心原则：\n"
+    "- 只抽取文中明确陈述或直接可推断的内容，禁止臆造、补全或泛化。\n"
+    "- 优先复用库中已有规范实体（运行时提供），确保同一概念在不同文献中使用相同规范名，"
+    "避免重复创建。\n"
+    "- 抽取粒度应足够细，能支持后续推理（如方法-材料-性能-应用之间的关联），"
+    "而非仅概括主题。\n"
+    "- 同时识别并抽取论文中的关键事件（如实验、发现、临床试验），"
+    "它们可能表达重要的过程性知识。"
 )
 
 ENTITY_TYPES = (
-    "Method, Dataset, Metric, Task, Concept, Tool, Person, Organization, "
-    "Material, Disease, Drug, Gene, BiologicalProcess, Event"
+    "Method, Material, Device, Drug, Disease, Model, Metric, Dataset, Task, Theory, "
+    "Parameter, Property, Application, Organism, CellLine, Chemical, Target, "
+    "BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Researcher"
 )
 
-RELATION_VOCAB = """关系类型请从以下受控词表选择（如实在无匹配才可新造 CamelCase 类型）：
-uses(使用/采用) · evaluates(评估/在…上评测) · compares(比较) · part_of(属于/组成部分)
-· improves_upon(改进自/优于) · based_on(基于/源自) · causes(导致/促进/诱导) · inhibits(抑制)
-· treats(治疗) · targets(靶向/结合/作用于) · has_property(具有属性/表现出)
-· made_of(由…制成/组成) · produced_by(由…产生/合成) · related_to(相关/关联)
-· cites(引用) · published_in(发表于) · authored_by(作者为) · developed_by(由…开发)
-
-同义归一规则：以下表述必须归一到左侧词表词，禁止使用多个变体制造“假新关系”：
-employ/utilize/apply → uses；assess/benchmark/test on/validate → evaluates；
-consist of/composed of → made_of；lead to/promote/enhance/induce/contribute to → causes；
-suppress/downregulate → inhibits；exhibit/possess/show → has_property；
-derived from → based_on；outperform/better than → improves_upon；
-act on/bind/interact with → targets；associated with/relate to → related_to。"""
-
-SCHEMA_HINT = """
-请严格输出一个 JSON 对象（不要输出其它文字、不要 markdown 代码块），结构如下：
+SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、不要 markdown 代码块），结构如下：
 {
   "entities": [
     {
-      "type": "受控类型；确有必要才新造(英文 CamelCase)",
-      "name": "规范名：优先复用「库中已有规范名」；否则用论文中最标准/通用的写法",
-      "aliases": ["该实体在文中出现的其它写法/缩写，如 RAG、additive manufacturing 等"],
-      "attributes": {"属性名": 值},
-      "confidence": 见置信度标尺,
-      "evidence": "支撑该实体的原句(可截断)"
+      "type": "受控类型；从下方类型列表选择，若确有必要才新造英文 CamelCase",
+      "name": "规范名：优先复用库中已有规范名；否则使用该领域最标准、无歧义的写法",
+      "aliases": ["该实体在文中出现的其它写法/缩写，如 RAG、additive manufacturing"],
+      "attributes": {"属性名": "值", "属性名2": "值2"},
+      "confidence": 0.0,
+      "evidence": "支撑该实体的原句（可截断，≤300字符）"
     }
   ],
   "relations": [
     {
-      "type": "受控词表中的关系词（按同义归一规则）",
-      "subject": "entities.name 或库中已有规范名",
-      "predicate": "一句话补述，不要与 type 重复表达同一动词",
-      "object": "entities.name 或库中已有规范名",
-      "confidence": 见置信度标尺,
-      "evidence": "支撑原句"
+      "type": "受控词表中的关系词（必须按同义归一规则选择）",
+      "subject": "entities.name 或库中已有规范名（必须与 entities 列表中 name 完全一致）",
+      "predicate": "一句话补述，不要与 type 重复表达同一动词，例如 type=uses 时 predicate 可为 '用于合成骨支架'",
+      "object": "entities.name 或库中已有规范名（必须与 entities 列表中 name 完全一致）",
+      "confidence": 0.0,
+      "evidence": "支撑原句（可截断，≤300字符）"
     }
   ],
   "events": [
     {
       "type": "Experiment|Study|Discovery|ClinicalTrial|Observation",
-      "trigger": "触发词或原句片段",
-      "participants": ["必须是 entities.name 或库中已有规范名"],
+      "trigger": "触发词或原句片段，如 'we conducted', 'results showed'",
+      "participants": ["entities.name 或库中已有规范名，必须与 entities 列表中的 name 完全一致"],
       "time": "时间描述或 null",
       "attributes": {},
-      "confidence": 见置信度标尺,
-      "evidence": "支撑原句"
+      "confidence": 0.0,
+      "evidence": "支撑原句（可截断，≤300字符）"
     }
   ]
 }
 
+实体类型建议列表（优先选择，若都不匹配再自造）：
+Method, Material, Device, Drug, Disease, Model, Metric, Dataset, Task, Theory,
+Parameter, Property, Application, Organism, CellLine, Chemical, Target,
+BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Researcher
+
 硬性要求：
-1. 连通性：每条 relation/event 的 subject、object、participants 必须与 entities 列表里的
-   name 或「库中已有规范名」精确一致（同一字符串）；不要把同一概念用变体再写一次。
-2. 每个实体尽量至少出现在一条 relation 或 event 中；确实无法关联的再作孤立实体。
-3. 同一概念合并：若论文中的表述与库中已有规范名是同一事物（或其别名/缩写），
-   name 必须直接复用库中规范名，并把本文写法放进 aliases，禁止重复创建。
-4. 实体命名：取该领域最通用、无歧义的标准名；首字母缩写在 name 或 aliases 中给出全称。
-5. 置信度标尺：0.9+ 多句/多段交叉印证；0.75~0.89 原文单句直接支持；0.6~0.74 由上下文
-   明确推断；<0.6 存疑尽量不输出。
-6. evidence 请引用原文句子（可节选），长度≤300 字符。"""
+1. 连通性：每条 relation 的 subject 和 object，以及每个 event 的 participants，
+   必须与 entities 列表中的 name 或「库中已有规范名」字符串完全相同（包括大小写和空格）。
+   不要使用变体或缩写。
+2. 每个实体尽量至少出现在一条 relation 或 event 中；确实无法关联的才作为孤立实体输出。
+3. 同一概念合并：若论文中的某个概念与库中已有规范名是同一事物（包括其别名、缩写），
+   则 name 必须直接复用库中规范名，并将本文中的写法加入 aliases 数组。例如库中已有
+   "Method: Retrieval-Augmented Generation"，论文中写 "RAG"，则 name 应为
+   "Retrieval-Augmented Generation"，aliases 包含 "RAG"。
+4. 实体命名：优先使用领域通用、无歧义的标准名称；缩写需在 name 或 aliases 中给出全称。
+   例如 name 可为 "Poly(lactic-co-glycolic acid)"，aliases 含 "PLGA"。
+5. 置信度标尺：0.9+ 多句/多段交叉印证；0.75~0.89 原文单句直接支持；0.6~0.74 由上下文明确推断；
+   <0.6 存疑尽量不输出。
+6. evidence 必须引用原文句子（可节选），不得改写或总结，长度≤300字符。
+7. 若论文中未出现事件，可省略 events 数组或输出空数组；但不要强行创造事件。"""
+
+RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才可新造 CamelCase 类型，且需在输出后解释原因，但尽量不新造）：
+- uses(使用/采用)
+- evaluates(评估/在…上评测)
+- compares(比较)
+- part_of(属于/组成部分)
+- improves_upon(改进自/优于)
+- based_on(基于/源自)
+- causes(导致/促进/诱导)
+- inhibits(抑制)
+- treats(治疗)
+- targets(靶向/结合/作用于)
+- has_property(具有属性/表现出)
+- made_of(由…制成/组成)
+- produced_by(由…产生/合成)
+- related_to(相关/关联)
+- cites(引用)
+- published_in(发表于)
+- authored_by(作者为)
+- developed_by(由…开发)
+
+同义归一规则：以下表述必须归一到左侧词表词，禁止使用多个变体制造“假新关系”：
+- employ / utilize / apply → uses
+- assess / benchmark / test on / validate → evaluates
+- consist of / composed of → made_of
+- lead to / promote / enhance / induce / contribute to → causes
+- suppress / downregulate → inhibits
+- exhibit / possess / show → has_property
+- derived from → based_on
+- outperform / better than → improves_upon
+- act on / bind / interact with → targets
+- associated with / relate to → related_to
+- compare with / versus → compares
+- treat / cure → treats
+- part of / belong to → part_of
+- cite / reference → cites
+- publish in / appear in → published_in
+- author by / written by → authored_by
+- develop / create / design → developed_by
+
+注意：同义归一后，type 字段必须使用左侧规范词（如 uses、evaluates），不得使用右侧原词。
+predicate 字段可补充具体内容，但避免重复动词。"""
 
 
 def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None,

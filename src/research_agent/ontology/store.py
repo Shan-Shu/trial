@@ -82,7 +82,15 @@ RELATION_SYNONYMS = {
     "produced by": "produced_by", "synthesized by": "produced_by",
     "secreted by": "produced_by", "generate": "produced_by",
     "compare with": "compares", "compared with": "compares",
+    "compare to": "compares", "compared to": "compares",
     "versus": "compares",
+    "cure": "treats", "treat": "treats", "treated": "treats",
+    "part of": "part_of", "belong to": "part_of",
+    "cite": "cites", "reference": "cites", "references": "cites",
+    "publish in": "published_in", "appear in": "published_in",
+    "author by": "authored_by", "written by": "authored_by",
+    "develop": "developed_by", "create": "developed_by", "creates": "developed_by",
+    "designed by": "developed_by",
 }
 
 
