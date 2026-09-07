@@ -113,16 +113,23 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             continue
         trigger = str(ev.get("trigger") or "").strip()
         etype = str(ev.get("type") or "Event").strip() or "Event"
-        name = trigger[:100] or f"{etype}:{ev_idx}"
-        if is_reporting_phrase(name):
+        participants = [str(p) for p in (ev.get("participants") or []) if str(p).strip()]
+        if is_reporting_phrase(trigger) or is_reporting_phrase(etype):
             stats["dropped_garbage"] += 1
             continue
+        # 事件名用名词式“类型: 参与者”，避免把整句/报告语当节点名
+        if participants:
+            name = f"{etype}: {participants[0]}"
+            if len(participants) > 1:
+                name += f" 等 {len(participants)} 项"
+        else:
+            name = f"{etype}#{ev_idx}"
         try:
             model_conf = float(ev.get("confidence") or 0.5)
         except (TypeError, ValueError):
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
-        attrs = {"time": ev.get("time")}
+        attrs = {"time": ev.get("time"), "trigger": trigger[:300]}
         if isinstance(ev.get("attributes"), dict):
             attrs.update(ev["attributes"])
         prov = [{"paper": paper_key, "evidence": str(ev.get("evidence") or "")[:500]}]
@@ -132,7 +139,7 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         )
         stats["events"] += 1
         stats["new_nodes"] += int(ev_is_new)
-        for participant in (ev.get("participants") or []):
+        for participant in participants:
             pid = _resolve(str(participant))
             if pid is None:
                 continue

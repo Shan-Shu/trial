@@ -59,8 +59,8 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
   "events": [
     {
       "type": "Experiment|Study|Discovery|ClinicalTrial|Observation",
-      "trigger": "触发词或原句片段，如 'we conducted', 'results showed'",
-      "participants": ["entities.name 或库中已有规范名，必须与 entities 列表中的 name 完全一致"],
+      "trigger": "精简名词短语（如 'histological analysis of group A'），不要整句、不要以报告语开头",
+      "participants": ["直接参与该事件的关键实体(≤5个)，必须与 entities 列表中的 name 完全一致"],
       "time": "时间描述或 null",
       "attributes": {},
       "confidence": 0.0,
@@ -102,7 +102,14 @@ BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Research
    禁止为了复用规范名而把不同配方、掺杂、比例或变体并入同一通用节点。
 10. 关系语义要具体：能用具体关系（uses/evaluates/made_of/promotes/inhibits/
     releases/differentiates_into/regulates/activates 等）就不要退回笼统的
-    related_to/causes；related_to 仅在确无更具体关系时作兜底。"""
+    related_to/causes；related_to 仅在确无更具体关系时作兜底。
+11. 事件必须是“做了什么的实验/过程/发现”，而不是一句话结论：trigger 用精简名词短语
+    （如 "histological analysis of group A"），禁止把整句或报告语（如
+    "We demonstrate ...", "results showed ...", "was developed using ..."）作为事件；
+    这类“结论性陈述”应表达为 relation/event 的 evidence，而不是事件本身。
+12. involves 关系克制使用：event.participants 仅列直接参与该事件的关键实体（≤5 个），
+    仅在确有参与关系时给出；不要把同句共现的无关概念全部拉成 participants，
+    避免 involves 变成笼统的“共现”关系。"""
 
 
 REPORTING_PHRASE_PREFIXES = [
@@ -112,6 +119,7 @@ REPORTING_PHRASE_PREFIXES = [
     "the histological", "histological analysis", "immunohistochemical",
     "the present study", "this study", "this paper", "this review", "this framework",
     "in this study", "we found", "we observed", "we demonstrated", "we show",
+    "we demonstrate", "here, we demonstrate", "we have demonstrated",
     "we described", "we summarize", "we propose", "it was found",
     "analysis showed", "analysis revealed", "results showed", "results demonstrated",
     "results indicated", "findings showed", "findings suggest", "findings demonstrate",
