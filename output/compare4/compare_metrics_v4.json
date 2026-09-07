@@ -1,0 +1,514 @@
+{
+  "v01": {
+    "papers": 338,
+    "runs": 52,
+    "types_registry": 156,
+    "nodes": 1135,
+    "edges": 1164,
+    "node_types": 78,
+    "relation_types": 77,
+    "non_canonical_relations": {
+      "accumulates_in": 1,
+      "adsorbs_to": 1,
+      "affects": 3,
+      "affiliated_with": 7,
+      "aims_to_provide": 1,
+      "applied_to": 1,
+      "associated_with": 10,
+      "bonds_to": 2,
+      "combined_with": 4,
+      "composed_of": 2,
+      "constructs": 4,
+      "coordinates": 3,
+      "corrects": 1,
+      "creates": 1,
+      "delivers": 1,
+      "determines": 1,
+      "discusses": 1,
+      "enables": 6,
+      "enables_delivery_of": 4,
+      "enhances": 8,
+      "enriches": 1,
+      "fabricated_by": 3,
+      "facilitates": 4,
+      "focuses_on": 1,
+      "forms": 1,
+      "governs": 2,
+      "guides": 2,
+      "has_application": 11,
+      "has_challenge": 5,
+      "has_limitation": 3,
+      "improves": 1,
+      "influenced_by": 3,
+      "influences": 2,
+      "involved_in": 3,
+      "is_critical_for": 1,
+      "maintains": 1,
+      "masks": 1,
+      "mitigates": 1,
+      "modulates": 4,
+      "occurs_after": 2,
+      "optimizes": 1,
+      "organizes": 1,
+      "penetrates": 2,
+      "prevents": 1,
+      "produces": 2,
+      "provides_foundation_for": 1,
+      "provides_strategy_for": 1,
+      "recapitulates": 1,
+      "reduces": 2,
+      "relies_on": 4,
+      "requires": 4,
+      "secretes": 1,
+      "stabilizes": 2,
+      "suppresses": 3,
+      "used_for": 2
+    },
+    "isolated": 164,
+    "isolated_ratio": 0.1445,
+    "components": 246,
+    "largest_comp_ratio": 0.4256,
+    "multi_paper_nodes": 55,
+    "multi_paper_ratio": 0.0485,
+    "avg_degree": 2.051,
+    "per_paper_nodes": 21.83,
+    "per_paper_edges": 22.38,
+    "top_node_types": [
+      [
+        "Concept",
+        319
+      ],
+      [
+        "Material",
+        201
+      ],
+      [
+        "Method",
+        104
+      ],
+      [
+        "Study",
+        52
+      ],
+      [
+        "Experiment",
+        50
+      ],
+      [
+        "Disease",
+        48
+      ],
+      [
+        "Discovery",
+        47
+      ],
+      [
+        "BiologicalProcess",
+        41
+      ],
+      [
+        "Metric",
+        23
+      ],
+      [
+        "Person",
+        21
+      ]
+    ],
+    "top_relations": [
+      [
+        "involves",
+        587
+      ],
+      [
+        "causes",
+        100
+      ],
+      [
+        "part_of",
+        75
+      ],
+      [
+        "has_property",
+        59
+      ],
+      [
+        "uses",
+        37
+      ],
+      [
+        "improves_upon",
+        23
+      ],
+      [
+        "treats",
+        21
+      ],
+      [
+        "based_on",
+        19
+      ],
+      [
+        "targets",
+        17
+      ],
+      [
+        "regulates",
+        14
+      ],
+      [
+        "evaluates",
+        13
+      ],
+      [
+        "authored_by",
+        12
+      ]
+    ],
+    "involves_share": 0.5043,
+    "event_nodes": 154,
+    "pseudo_events": 154
+  },
+  "v02": {
+    "papers": 288,
+    "runs": 50,
+    "types_registry": 49,
+    "nodes": 574,
+    "edges": 874,
+    "node_types": 21,
+    "relation_types": 15,
+    "non_canonical_relations": {},
+    "isolated": 0,
+    "isolated_ratio": 0.0,
+    "components": 9,
+    "largest_comp_ratio": 0.9669,
+    "multi_paper_nodes": 57,
+    "multi_paper_ratio": 0.0993,
+    "avg_degree": 3.045,
+    "per_paper_nodes": 11.48,
+    "per_paper_edges": 17.48,
+    "top_node_types": [
+      [
+        "Material",
+        99
+      ],
+      [
+        "BiologicalProcess",
+        94
+      ],
+      [
+        "Property",
+        64
+      ],
+      [
+        "Observation",
+        45
+      ],
+      [
+        "Method",
+        40
+      ],
+      [
+        "Experiment",
+        35
+      ],
+      [
+        "Chemical",
+        29
+      ],
+      [
+        "Disease",
+        23
+      ],
+      [
+        "Discovery",
+        21
+      ],
+      [
+        "Study",
+        21
+      ]
+    ],
+    "top_relations": [
+      [
+        "involves",
+        366
+      ],
+      [
+        "related_to",
+        106
+      ],
+      [
+        "causes",
+        100
+      ],
+      [
+        "has_property",
+        84
+      ],
+      [
+        "part_of",
+        45
+      ],
+      [
+        "uses",
+        45
+      ],
+      [
+        "made_of",
+        31
+      ],
+      [
+        "inhibits",
+        27
+      ],
+      [
+        "treats",
+        21
+      ],
+      [
+        "targets",
+        18
+      ],
+      [
+        "produced_by",
+        12
+      ],
+      [
+        "compares",
+        8
+      ]
+    ],
+    "involves_share": 0.4188,
+    "event_nodes": 122,
+    "pseudo_events": 122
+  },
+  "v03": {
+    "papers": 50,
+    "runs": 50,
+    "types_registry": 55,
+    "nodes": 569,
+    "edges": 754,
+    "node_types": 25,
+    "relation_types": 20,
+    "non_canonical_relations": {},
+    "isolated": 10,
+    "isolated_ratio": 0.0176,
+    "components": 24,
+    "largest_comp_ratio": 0.9156,
+    "multi_paper_nodes": 56,
+    "multi_paper_ratio": 0.0984,
+    "avg_degree": 2.65,
+    "per_paper_nodes": 11.38,
+    "per_paper_edges": 15.08,
+    "top_node_types": [
+      [
+        "Material",
+        116
+      ],
+      [
+        "BiologicalProcess",
+        92
+      ],
+      [
+        "Property",
+        68
+      ],
+      [
+        "Chemical",
+        59
+      ],
+      [
+        "Method",
+        42
+      ],
+      [
+        "Observation",
+        32
+      ],
+      [
+        "Experiment",
+        32
+      ],
+      [
+        "Disease",
+        25
+      ],
+      [
+        "Model",
+        18
+      ],
+      [
+        "Application",
+        13
+      ]
+    ],
+    "top_relations": [
+      [
+        "involves",
+        236
+      ],
+      [
+        "promotes",
+        98
+      ],
+      [
+        "has_property",
+        75
+      ],
+      [
+        "regulates",
+        57
+      ],
+      [
+        "uses",
+        48
+      ],
+      [
+        "part_of",
+        41
+      ],
+      [
+        "made_of",
+        31
+      ],
+      [
+        "treats",
+        30
+      ],
+      [
+        "inhibits",
+        28
+      ],
+      [
+        "produced_by",
+        23
+      ],
+      [
+        "related_to",
+        22
+      ],
+      [
+        "targets",
+        14
+      ]
+    ],
+    "involves_share": 0.313,
+    "event_nodes": 75,
+    "pseudo_events": 75
+  },
+  "v04": {
+    "papers": 50,
+    "runs": 50,
+    "types_registry": 55,
+    "nodes": 541,
+    "edges": 697,
+    "node_types": 24,
+    "relation_types": 20,
+    "non_canonical_relations": {},
+    "isolated": 0,
+    "isolated_ratio": 0.0,
+    "components": 12,
+    "largest_comp_ratio": 0.9409,
+    "multi_paper_nodes": 54,
+    "multi_paper_ratio": 0.0998,
+    "avg_degree": 2.577,
+    "per_paper_nodes": 10.82,
+    "per_paper_edges": 13.94,
+    "top_node_types": [
+      [
+        "Material",
+        110
+      ],
+      [
+        "BiologicalProcess",
+        89
+      ],
+      [
+        "Property",
+        60
+      ],
+      [
+        "Experiment",
+        48
+      ],
+      [
+        "Method",
+        37
+      ],
+      [
+        "Chemical",
+        36
+      ],
+      [
+        "Disease",
+        21
+      ],
+      [
+        "CellType",
+        19
+      ],
+      [
+        "Protein",
+        19
+      ],
+      [
+        "Model",
+        19
+      ]
+    ],
+    "top_relations": [
+      [
+        "involves",
+        210
+      ],
+      [
+        "promotes",
+        102
+      ],
+      [
+        "regulates",
+        65
+      ],
+      [
+        "has_property",
+        60
+      ],
+      [
+        "uses",
+        47
+      ],
+      [
+        "part_of",
+        38
+      ],
+      [
+        "made_of",
+        29
+      ],
+      [
+        "related_to",
+        27
+      ],
+      [
+        "inhibits",
+        25
+      ],
+      [
+        "treats",
+        21
+      ],
+      [
+        "releases",
+        14
+      ],
+      [
+        "produced_by",
+        13
+      ]
+    ],
+    "involves_share": 0.3013,
+    "event_nodes": 77,
+    "pseudo_events": 0
+  }
+}
