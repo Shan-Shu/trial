@@ -1,0 +1,68 @@
+"""入库规范化测试：关系词同义归一 + 别名去重合并。"""
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from research_agent.db import connect
+from research_agent.ontology import store as ont
+
+
+class OntologyNormalizeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.conn = connect(Path(self.tmp.name) / "norm.db")
+        ont.init_ontology(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmp.cleanup()
+
+    def test_canonical_relation(self):
+        self.assertEqual(ont.canonical_relation_type("utilizes"), "uses")
+        self.assertEqual(ont.canonical_relation_type("assessed"), "evaluates")
+        self.assertEqual(ont.canonical_relation_type("promotes"), "causes")
+        self.assertEqual(ont.canonical_relation_type("composed of"), "made_of")
+        self.assertEqual(ont.canonical_relation_type("novel_link"), "novel_link")
+
+    def test_edge_relation_normalized_in_db(self):
+        n1 = ont.upsert_node(self.conn, node_type="Method", name="X", confidence=0.8)[0]
+        n2 = ont.upsert_node(self.conn, node_type="Dataset", name="Y", confidence=0.8)[0]
+        eid, is_new = ont.upsert_edge(self.conn, relation_type="utilizes",
+                                      src_id=n1, tgt_id=n2, confidence=0.9)
+        self.assertTrue(is_new)
+        row = self.conn.execute(
+            "SELECT relation_type FROM ontology_edges WHERE edge_id=?", (eid,)
+        ).fetchone()
+        self.assertEqual(row["relation_type"], "uses")
+        reg = self.conn.execute(
+            "SELECT 1 FROM ontology_type_registry WHERE type_key='uses'"
+        ).fetchone()
+        self.assertIsNotNone(reg)
+
+    def test_alias_merge_across_papers(self):
+        # 论文 A：以缩写建节点
+        n1, new1 = ont.upsert_node(
+            self.conn, node_type="Material", name="CPC",
+            aliases=["calcium phosphate cement"], confidence=0.8,
+            provenance=[{"paper": "pA", "evidence": "CPC (calcium phosphate cement)"}])
+        self.assertTrue(new1)
+        # 论文 B：用全称建节点（其缩写恰为论文 A 的规范名/别名）
+        n2, new2 = ont.upsert_node(
+            self.conn, node_type="Material", name="calcium phosphate cement",
+            aliases=["CPC"], confidence=0.9,
+            provenance=[{"paper": "pB", "evidence": "calcium phosphate cement (CPC)"}])
+        self.assertEqual(n1, n2)
+        self.assertFalse(new2)
+        row = self.conn.execute(
+            "SELECT name, aliases, provenance FROM ontology_nodes WHERE node_id=?", (n1,)
+        ).fetchone()
+        self.assertEqual(row["name"], "CPC")
+        import json
+        self.assertIn("calcium phosphate cement", json.loads(row["aliases"]))
+        self.assertEqual(len(json.loads(row["provenance"])), 2)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

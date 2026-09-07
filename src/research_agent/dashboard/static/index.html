@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>research-agent 看板 · 动态本体与智能体状态</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <div>
+        <h1>research-agent 科研文献智能体看板</h1>
+        <p class="db-label" id="dbLabel">…</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <label class="switch">
+        <input type="checkbox" id="autoRefresh" checked />
+        <span>自动刷新 6s</span>
+      </label>
+      <button id="refreshBtn" class="btn">⟳ 刷新</button>
+    </div>
+  </header>
+
+  <section class="stat-row" id="statChips"></section>
+
+  <div class="layout">
+    <!-- 左侧：智能体状态 + 活动日志 -->
+    <aside class="sidebar">
+      <h2>智能体工作状态</h2>
+      <div id="agentBoard"></div>
+
+      <h2 class="mt">最近活动</h2>
+      <ul class="activity" id="activityList"></ul>
+    </aside>
+
+    <!-- 右侧：图谱 / 文献 -->
+    <main class="main">
+      <nav class="tabs">
+        <button class="tab active" data-tab="graph" id="tabGraph">本体图谱</button>
+        <button class="tab" data-tab="papers" id="tabPapers">文献列表</button>
+      </nav>
+
+      <section id="view-graph" class="view">
+        <div class="graph-toolbar">
+          <div class="tfilters" id="typeFilters"></div>
+          <div class="tool">
+            <label>最低置信度 <span id="minConfVal">0</span></label>
+            <input type="range" id="minConf" min="0" max="1" step="0.05" value="0" />
+          </div>
+          <input type="search" id="qSearch" placeholder="按名称搜索节点…" />
+          <button class="btn small" id="btnApplyGraph">应用</button>
+          <button class="btn small ghost" id="btnResetGraph">重置</button>
+          <span class="graph-stats" id="graphStats"></span>
+        </div>
+        <div id="graphBox"><p class="hint">正在加载本体图谱…</p></div>
+      </section>
+
+      <section id="view-papers" class="view hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>入库时间</th><th>来源</th><th>标题</th><th>期刊/库</th>
+                <th>年份</th><th>决策</th><th>Q</th><th>状态</th>
+                <th>实体/关系/事件</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="paperTbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 详情面板 -->
+  <section id="detailPanel" class="detail hidden">
+    <div class="detail-head">
+      <span id="detailTitle">详情</span>
+      <button class="btn small ghost" id="detailClose">✕</button>
+    </div>
+    <div id="detailBody"></div>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/vendor/vis-network.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

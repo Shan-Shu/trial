@@ -1,0 +1,23 @@
+﻿# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 本地密钥
+.env
+.env.*
+!.env.example
+*.log
+
+# 本地数据（论文 PDF BLOB、清洗文本、动态本体数据库）
+data/
+
+# 导出/生成物（看板图谱导出、第三方 vendor 副本等）
+assets/
+output/
