@@ -10,6 +10,7 @@ from research_agent.db import connect, get_paper, get_quality_result, log_event
 from research_agent.knowledge.extractor import (
     KnowledgeExtractor,
     blend_confidence,
+    is_reporting_phrase,
 )
 from research_agent.knowledge.preprocess import (
     chunk_paragraphs,
@@ -44,7 +45,8 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                       paper_key: str, settings: Settings) -> dict[str, Any]:
     """把一次抽取结果写入本体，返回统计（新增节点/边/类型）。"""
     stats = {"entities": 0, "relations": 0, "events": 0,
-             "new_nodes": 0, "new_edges": 0, "new_types": []}
+             "new_nodes": 0, "new_edges": 0, "new_types": [],
+             "dropped_garbage": 0}
     name_to_id: dict[tuple[str, str], int] = {}
 
     for e in data.get("entities") or []:
@@ -52,6 +54,9 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             continue
         name = str(e.get("name") or "").strip()
         if not name:
+            continue
+        if is_reporting_phrase(name):
+            stats["dropped_garbage"] += 1
             continue
         ntype = str(e.get("type") or "Concept").strip() or "Concept"
         model_conf = e.get("confidence")
@@ -109,6 +114,9 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         trigger = str(ev.get("trigger") or "").strip()
         etype = str(ev.get("type") or "Event").strip() or "Event"
         name = trigger[:100] or f"{etype}:{ev_idx}"
+        if is_reporting_phrase(name):
+            stats["dropped_garbage"] += 1
+            continue
         try:
             model_conf = float(ev.get("confidence") or 0.5)
         except (TypeError, ValueError):
@@ -170,7 +178,8 @@ def make_knowledge_node(model=None,
                 "chunks": len(chunks),
             }
             totals: dict[str, Any] = {"entities": 0, "relations": 0, "events": 0,
-                                      "new_nodes": 0, "new_edges": 0, "new_types": []}
+                                      "new_nodes": 0, "new_edges": 0, "new_types": [],
+                                      "dropped_garbage": 0}
             meta = {
                 "title": rec.get("title"), "venue": rec.get("venue"),
                 "pub_year": rec.get("pub_year"), "doi": rec.get("doi"),
@@ -205,7 +214,8 @@ def make_knowledge_node(model=None,
                     db, data, quality_q=quality_q, flagged=flagged,
                     paper_key=key, settings=settings,
                 )
-                for k in ("entities", "relations", "events", "new_nodes", "new_edges"):
+                for k in ("entities", "relations", "events", "new_nodes",
+                          "new_edges", "dropped_garbage"):
                     totals[k] += chunk_stats[k]
             db.commit()
             after_types = {

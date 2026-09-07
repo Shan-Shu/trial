@@ -22,7 +22,10 @@ class OntologyNormalizeTest(unittest.TestCase):
     def test_canonical_relation(self):
         self.assertEqual(ont.canonical_relation_type("utilizes"), "uses")
         self.assertEqual(ont.canonical_relation_type("assessed"), "evaluates")
-        self.assertEqual(ont.canonical_relation_type("promotes"), "causes")
+        self.assertEqual(ont.canonical_relation_type("promotes"), "promotes")
+        self.assertEqual(ont.canonical_relation_type("enhance"), "promotes")
+        self.assertEqual(ont.canonical_relation_type("upregulates"), "regulates")
+        self.assertEqual(ont.canonical_relation_type("induce"), "promotes")
         self.assertEqual(ont.canonical_relation_type("composed of"), "made_of")
         self.assertEqual(ont.canonical_relation_type("novel_link"), "novel_link")
 

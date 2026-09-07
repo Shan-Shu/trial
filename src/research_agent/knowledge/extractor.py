@@ -88,7 +88,56 @@ BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Research
 5. 置信度标尺：0.9+ 多句/多段交叉印证；0.75~0.89 原文单句直接支持；0.6~0.74 由上下文明确推断；
    <0.6 存疑尽量不输出。
 6. evidence 必须引用原文句子（可节选），不得改写或总结，长度≤300字符。
-7. 若论文中未出现事件，可省略 events 数组或输出空数组；但不要强行创造事件。"""
+7. 若论文中未出现事件，可省略 events 数组或输出空数组；但不要强行创造事件。
+8. 实体命名必须是名词性领域术语/专名。禁止把句子、衔接语、证据句或报告性短语当作
+   name（如 "These results suggest ...", "The histological analysis showed ...",
+   "In this study, we ...", "This review summarizes ...", "We demonstrated ..."）。
+   这类内容属于 relation/event 的 evidence 或 predicate，而不是实体；实体应只保留
+   被陈述的核心事物名词，例如 "Calcium phosphate cement" 而非
+   "The calcium phosphate cement was found to promote ..."。
+9. 细节保留、禁止过度合并：仅当两个名称指向“同一个具体事物”时才复用规范名。
+   带实质性修饰的不同对象必须分别建实体，并把组成/配比/掺杂/工艺写入 attributes；
+   例如 "Magnesium-doped calcium phosphate cement"、"Strontium-doped calcium
+   phosphate cement" 与 泛称 "Calcium phosphate cement" 是不同实体；
+   禁止为了复用规范名而把不同配方、掺杂、比例或变体并入同一通用节点。
+10. 关系语义要具体：能用具体关系（uses/evaluates/made_of/promotes/inhibits/
+    releases/differentiates_into/regulates/activates 等）就不要退回笼统的
+    related_to/causes；related_to 仅在确无更具体关系时作兜底。"""
+
+
+REPORTING_PHRASE_PREFIXES = [
+    "these results", "these findings", "these data", "these observations",
+    "our results", "our data", "our findings", "our observations",
+    "the results", "the findings", "the data", "the observation",
+    "the histological", "histological analysis", "immunohistochemical",
+    "the present study", "this study", "this paper", "this review", "this framework",
+    "in this study", "we found", "we observed", "we demonstrated", "we show",
+    "we described", "we summarize", "we propose", "it was found",
+    "analysis showed", "analysis revealed", "results showed", "results demonstrated",
+    "results indicated", "findings showed", "findings suggest", "findings demonstrate",
+    "data showed", "data revealed", "taken together", "collectively",
+    "the aim of", "the goal of",
+]
+_REPORT_VERBS = re.compile(
+    r"\b(show(s|ed)?|suggest(s|ed)?|indicat(es|ed)?|demonstrat(es|ed)?|reveal(s|ed)?|"
+    r"found|observed|describe(s|d)?|summariz(e|es|ed)?|propose(s|d)?|highlight(s|ed)?|"
+    r"aim(s|ed)?|was found|were found|were developed|was investigated)\b",
+    re.IGNORECASE,
+)
+
+
+def is_reporting_phrase(name: str | None) -> bool:
+    """判断实体名是否为“衔接语/证据句/报告性短语”（应被过滤）。"""
+    t = (name or "").strip()
+    if not t or len(t) < 2:
+        return True
+    low = t.lower()
+    if any(low.startswith(p) for p in REPORTING_PHRASE_PREFIXES):
+        return True
+    head = " ".join(low.split()[:7])
+    if _REPORT_VERBS.search(head):
+        return True
+    return False
 
 RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才可新造 CamelCase 类型，且需在输出后解释原因，但尽量不新造）：
 - uses(使用/采用)
@@ -97,7 +146,12 @@ RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才
 - part_of(属于/组成部分)
 - improves_upon(改进自/优于)
 - based_on(基于/源自)
-- causes(导致/促进/诱导)
+- causes(导致/促成/诱发；指因果)
+- promotes(促进/增强/加速，如促进成骨、增强血管化)
+- regulates(调控/调节)
+- activates(激活)
+- releases(释放/缓释，如药物/离子缓释)
+- differentiates_into(分化为)
 - inhibits(抑制)
 - treats(治疗)
 - targets(靶向/结合/作用于)
@@ -114,7 +168,12 @@ RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才
 - employ / utilize / apply → uses
 - assess / benchmark / test on / validate → evaluates
 - consist of / composed of → made_of
-- lead to / promote / enhance / induce / contribute to → causes
+- lead to / contribute to / trigger → causes
+- promote / enhances / facilitate / accelerate / boost / induce / induced → promotes
+- up-regulate / upregulate → regulates
+- activate / activates → activates
+- release / releases / elute / sustained release → releases
+- differentiate into / differentiate to → differentiates_into
 - suppress / downregulate → inhibits
 - exhibit / possess / show → has_property
 - derived from → based_on
@@ -129,8 +188,10 @@ RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才
 - author by / written by → authored_by
 - develop / create / design → developed_by
 
-注意：同义归一后，type 字段必须使用左侧规范词（如 uses、evaluates），不得使用右侧原词。
-predicate 字段可补充具体内容，但避免重复动词。"""
+注意：同义归一后，type 字段必须使用左侧规范词（如 uses、evaluates、promotes），不得使用右侧原词。
+predicate 字段可补充具体内容，但避免重复动词。
+避免关系语义过宽：只要语义能落到某个具体词（如 promotes/inhibits/releases/differentiates_into），
+就不要退回 related_to 或 causes；related_to 仅作兜底。"""
 
 
 def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None,
