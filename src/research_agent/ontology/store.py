@@ -347,18 +347,23 @@ def _merge_aliases(old: list, new: list) -> list:
 
 
 def _merge_attributes(old: dict, new: dict, provenance_key: str) -> dict:
-    """属性合并：old/new 均为 {attr: value}；同属性取新值并记录来源。"""
+    """属性合并：old/new 均为 {attr: value}；仅保留非空值。
+
+    v0.0.5 起不再生成 {value, source} 包装：来源统一由 provenance 记录；
+    同属性出现不同值时收敛为列表（纯值，无 source 内嵌）。
+    """
     merged = dict(old or {})
     for k, v in (new or {}).items():
-        entry = {"value": v, "source": provenance_key}
+        if v is None or v == "" or v == [] or v == {}:
+            continue
         prev = merged.get(k)
-        if isinstance(prev, list) and prev and "value" in prev[-1]:
-            prev.append(entry)
+        if k in merged and prev != v:
+            if not isinstance(prev, list):
+                merged[k] = [prev]
+            if v not in merged[k]:
+                merged[k].append(v)
         else:
-            merged[k] = [entry] if prev is not None else entry
-        # 若此前为单值 dict 形态，则升级为列表
-        if isinstance(merged[k], dict) and "source" in merged[k]:
-            merged[k] = [merged[k]]
+            merged[k] = v
     return merged
 
 

@@ -214,6 +214,20 @@ predicate 字段可补充具体内容，但避免重复动词。
 就不要退回 related_to 或 causes；related_to 仅作兜底。"""
 
 
+ATTRIBUTE_HINT = """属性（attributes）规范：
+1. 只写有意义的值：值为 None/空串/空列表时省略该键；
+2. 键名用 snake_case（如 fabrication_method、defect_site、cell_types_involved）；
+3. 数值必须拆成 {"value": 数字, "unit": 单位}（如 "5 wt%" → {"value":5,"unit":"wt%"}）；
+   时间用相对时长（P2D/PT16H）或写明 timepoint，不写自由长句；
+4. 按类型尽量给出模板字段：
+   - Material: composition/components/fabrication_method/architecture/application
+   - Model: species/defect_site/model_type
+   - Disease: etiology/pathology_site/related_signs
+   - BiologicalProcess: regulators/cell_types_involved/downstream_outcome
+   - Property: metric_type（值拆为 value+unit 或 rating）
+5. 不要用“excellent/controllable”这类形容词冒充定量；形容词仅放 rating 并在 evidence 保留原文。"""
+
+
 def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None,
                  existing_entities: list[str] | None = None) -> str:
     meta = paper_meta or {}
@@ -222,7 +236,7 @@ def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None
         f"| 年份: {meta.get('pub_year', '未知')}"
     )
     text = "\n\n".join(paragraphs)
-    parts = [SYSTEM_HINT, SCHEMA_HINT, RELATION_VOCAB, header]
+    parts = [SYSTEM_HINT, SCHEMA_HINT, ATTRIBUTE_HINT, RELATION_VOCAB, header]
     if existing_entities:
         parts.append(
             "库中已有（尽量复用的）规范实体（Type: Name）：\n"

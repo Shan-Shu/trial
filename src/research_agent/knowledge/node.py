@@ -60,6 +60,43 @@ def _evidence_tier(title: str | None) -> str:
     return "primary"
 
 
+_NUM_UNIT_RE = re.compile(
+    r"^\s*(-?\d+(?:\.\d+)?)\s*([%a-zA-Zµμ°/×]+)\s*$")
+
+
+def _clean_attr_key(key: str) -> str:
+    k = re.sub(r"\s+", "_", str(key or "").strip().lower())
+    k = re.sub(r"[^a-z0-9_\u4e00-\u9fff]+", "", k)
+    return k or "attr"
+
+
+def _clean_attr_value(v: Any) -> Any:
+    """去掉空值；把 “5 wt% / 227.86 kPa / 36°C / 4.67%” 拆为 {value, unit}。"""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        if not v.strip():
+            return None
+        m = _NUM_UNIT_RE.match(v)
+        if m and m.group(2):
+            return {"value": float(m.group(1)), "unit": m.group(2).strip()}
+        return v
+    if isinstance(v, (list, dict)) and not v:
+        return None
+    return v
+
+
+def _clean_attrs(attrs: dict | None) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k, v in (attrs or {}).items():
+        kk = _clean_attr_key(str(k))
+        vv = _clean_attr_value(v)
+        if vv is None:
+            continue
+        out[kk] = vv
+    return out
+
+
 def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                       quality_q: float | None, flagged: bool,
                       paper_key: str, settings: Settings,
@@ -87,7 +124,7 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
         aliases = [str(a) for a in (e.get("aliases") or []) if str(a).strip()]
-        attrs = e.get("attributes") if isinstance(e.get("attributes"), dict) else {}
+        attrs = _clean_attrs(e.get("attributes"))
         prov = [{"paper": paper_key, "evidence": str(e.get("evidence") or "")[:500]}]
         node_id, is_new = upsert_node(
             conn, node_type=ntype, name=name, confidence=conf,
@@ -160,9 +197,10 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         except (TypeError, ValueError):
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
-        attrs = {"time": ev.get("time")}
-        if isinstance(ev.get("attributes"), dict):
-            attrs.update(ev["attributes"])
+        attrs = {}
+        if ev.get("time") is not None and str(ev.get("time") or "").strip():
+            attrs["time"] = _clean_attr_value(ev.get("time"))
+        attrs.update(_clean_attrs(ev.get("attributes")))
         prov = [{"paper": paper_key, "evidence": str(ev.get("evidence") or "")[:500]}]
         refs = []
         for participant in participants:
