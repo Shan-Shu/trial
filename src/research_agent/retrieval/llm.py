@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -58,6 +59,8 @@ PLAN_PROMPT_TEMPLATE = """你是科研文献检索规划器。用户会给出一
 5. 避免不同检索式之间关键词大量重复，每个子领域的检索应相对独立。
 6. 只输出 JSON 数组字符串，数组元素为字符串，例如：["bone repair biomaterials AND bioactivity", "osteogenic scaffolds AND mechanical properties", "biodegradable bone graft AND clinical translation", "bone regeneration AND osteoinductive mechanism"]。
 7. 不要输出任何解释、注释或额外文本，确保输出可直接被 JSON 解析。
+8. 目标文献库为 PubMed：AND/OR/NOT、双引号短语、通配符* 与字段限定 [Title/Abstract] 均受支持；
+   如需突出近期进展可在检索式中加 [dp] 年份过滤。当前日期：{date}。
 
 主题：{topic}"""
 
@@ -104,7 +107,8 @@ class RetrievalLLM:
     # ---- 1) 查询规划 ----
     def plan_queries(self, topic: str) -> list[str]:
         """基于研究主题生成一组覆盖多子领域的英文检索式（4-6 条）。"""
-        prompt = PLAN_PROMPT_TEMPLATE.replace("{topic}", topic)
+        prompt = PLAN_PROMPT_TEMPLATE.replace("{topic}", topic).replace(
+            "{date}", date.today().isoformat())
         try:
             msg = self.model.invoke([HumanMessage(content=prompt)])
             raw = getattr(msg, "content", str(msg))

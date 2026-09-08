@@ -60,6 +60,31 @@ def _evidence_tier(title: str | None) -> str:
     return "primary"
 
 
+def _generic_relation_warning(conn: sqlite3.Connection,
+                              settings: Settings) -> str | None:
+    """库内兜底关系统计提醒：抑制语料内泛化关系持续放大（v0.0.6）。"""
+    fb = list(settings.generic_fallback_types or ())
+    if not fb:
+        return None
+    ph = ",".join("?" for _ in fb)
+    rows = conn.execute(
+        f"SELECT relation_type, COUNT(*) AS c FROM ontology_edges "
+        f"WHERE relation_type IN ({ph}) GROUP BY relation_type ORDER BY c DESC",
+        tuple(fb),
+    ).fetchall()
+    if not rows:
+        return None
+    runs = conn.execute("SELECT COUNT(*) FROM ontology_runs").fetchone()[0] or 0
+    lines = [f"语料提醒：本库已处理约 {runs} 篇，以下兜底关系已存在，请勿继续无谓放大："]
+    lines += [f"  - {r['relation_type']}: {r['c']} 条" for r in rows]
+    lines.append(
+        "（ERROR LIST #3）只有当原文语义确实没有更具体关系时，才新增这类兜底关系；"
+        "能落到 promotes/inhibits/releases/differentiates_into/enables/regulates/activates/"
+        "results_in 等具体关系，就必须用具体关系。"
+    )
+    return "\n".join(lines)
+
+
 _NUM_UNIT_RE = re.compile(
     r"^\s*(-?\d+(?:\.\d+)?)\s*([%a-zA-Zµμ°/×]+)\s*$")
 
@@ -252,7 +277,9 @@ def make_knowledge_node(model=None,
             }
             totals: dict[str, Any] = {"entities": 0, "relations": 0, "events": 0,
                                       "new_nodes": 0, "new_edges": 0, "new_types": [],
-                                      "dropped_garbage": 0}
+                                      "dropped_garbage": 0,
+                                      "refine_runs": 0, "refine_issues": 0,
+                                      "refine_attempts": 0, "refine_failed": 0}
             meta = {
                 "title": rec.get("title"), "venue": rec.get("venue"),
                 "pub_year": rec.get("pub_year"), "doi": rec.get("doi"),
@@ -265,6 +292,7 @@ def make_knowledge_node(model=None,
 
             extractor = KnowledgeExtractor(model, settings)
             tier = _evidence_tier(rec.get("title"))
+            generic_warning = _generic_relation_warning(db, settings)
             existing_entities = [
                 r["label"] for r in db.execute(
                     """
@@ -283,7 +311,8 @@ def make_knowledge_node(model=None,
                 for r in db.execute("SELECT type_key FROM ontology_type_registry")
             }
             for chunk in chunks:
-                data = extractor.extract(chunk, meta, existing_entities)
+                data, refine_stats = extractor.extract_with_refine(
+                    chunk, meta, existing_entities, generic_warning)
                 chunk_stats = _upsert_knowledge(
                     db, data, quality_q=quality_q, flagged=flagged,
                     paper_key=key, settings=settings, evidence_tier=tier,
@@ -291,6 +320,11 @@ def make_knowledge_node(model=None,
                 for k in ("entities", "relations", "events", "new_nodes",
                           "new_edges", "dropped_garbage"):
                     totals[k] += chunk_stats[k]
+                if refine_stats.get("attempts"):
+                    totals["refine_runs"] += 1
+                totals["refine_issues"] += refine_stats.get("issues", 0)
+                totals["refine_attempts"] += refine_stats.get("attempts", 0)
+                totals["refine_failed"] += refine_stats.get("failed_attempts", 0)
             db.commit()
             after_types = {
                 r["type_key"]

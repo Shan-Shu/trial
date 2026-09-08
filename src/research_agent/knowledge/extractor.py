@@ -228,21 +228,65 @@ ATTRIBUTE_HINT = """属性（attributes）规范：
 5. 不要用“excellent/controllable”这类形容词冒充定量；形容词仅放 rating 并在 evidence 保留原文。"""
 
 
-def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None,
-                 existing_entities: list[str] | None = None) -> str:
-    meta = paper_meta or {}
-    header = (
+ERROR_LIST_HINT = """硬性禁区（ERROR LIST——违反任一条都必须改正后才能输出，不允许用“接近/相关”之类的说法蒙混）：
+1. 【禁止报告语/衔接语当实体】实体 name 必须是被陈述的“事物名词/专名”。
+   ✗ 错误：name="These results suggest ..." / "The histological analysis showed ..." /
+     "In this study, we ..." / "We demonstrated that ..."
+   ✓ 正确：name="Calcium phosphate cement"，把这些报告语表达放进 evidence/predicate。
+2. 【禁止合并丢失细节】只有指向“同一个具体事物”（含其别名/缩写）才复用规范名。
+   带实质修饰的不同对象必须分别建实体：Magnesium-doped CPC、Strontium-doped CPC、
+   β-TCP/HA 复合支架 与 泛称 Calcium phosphate cement 是不同实体；
+   组成/配比/掺杂/工艺写入 attributes。宁可多建实体，禁止“并入泛称”造成信息丢失。
+3. 【禁止兜底关系放大】related_to 只在“原文语义确实没有更具体关系”时兜底；
+   能落到 promotes/inhibits/releases/differentiates_into/enables/regulates/activates/
+   results_in/risk_factor_for 等具体词，就必须用具体词；同义必须归一，禁止同一语义换词造“假新关系”。
+4. 【禁止同一概念名漂移】同一概念在本文、与库中规范名之间必须统一字符串；
+   不同写法放 aliases，不得在本篇内或跨篇使用变体造成重复节点。
+5. 【禁止属性无证据/形容词冒充定量】数值属性要有原句支撑并拆 {value, unit}；
+   "excellent/controllable" 之类形容词不得作为定量属性值，只能作 rating 并保留 evidence。
+6. 【禁止把推测写成确定】"may/could/might/possibly" 等推测断言 confidence 不得 ≥0.8；
+   review/commentary 类文献的断言整体下调一档。
+7. 【禁止断连/字符串不一致】relation.subject/object 与 event.participants 必须与
+   entities 或「库中已有规范名」字符串完全一致（含大小写与空格），不许用变体或缩写。
+8. 【禁止伪造证据】evidence 必须引用原文句子（可节选，≤300 字符），不得改写/总结/编造。"""
+
+
+SELF_CHECK_HINT = """输出前请逐条自查（违反硬性禁区或下面任一条，先修正再输出；不要带着问题交付）：
+1. entity.name 均为名词性术语/专名：非句子、非衔接语、非报告语（对照 ERROR LIST #1）；
+2. 同一概念已复用「库中已有规范名」，不同配方/掺杂/比例/工艺未误并入泛称（#2）；
+3. relation.type 来自受控词表且已同义归一，无兜底关系滥用；subject/object 与 entities 或库中名称完全一致（#3/#4/#7）；
+4. event.trigger 是精简名词短语，participants ≤5 且指向实体；
+5. attributes 无 None/空值，数值已拆 {value, unit}，键名为 snake_case（#5）；
+6. evidence 引用原文句子；推测性断言与 review/commentary 文献已下调 confidence（#6/#8）。"""
+
+
+GENERIC_FALLBACK_TYPES = frozenset({"related_to"})
+
+
+def _paper_header(meta: dict[str, Any] | None) -> str:
+    meta = meta or {}
+    return (
         f"论文: {meta.get('title', '未知')} | 期刊: {meta.get('venue', '未知')} "
         f"| 年份: {meta.get('pub_year', '未知')}"
     )
+
+
+def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None,
+                 existing_entities: list[str] | None = None,
+                 recent_generic_warning: str | None = None) -> str:
+    header = _paper_header(paper_meta)
     text = "\n\n".join(paragraphs)
-    parts = [SYSTEM_HINT, SCHEMA_HINT, ATTRIBUTE_HINT, RELATION_VOCAB, header]
+    parts = [SYSTEM_HINT, SCHEMA_HINT, ATTRIBUTE_HINT, RELATION_VOCAB,
+             ERROR_LIST_HINT,
+             SELF_CHECK_HINT, header]
     if existing_entities:
         parts.append(
             "库中已有（尽量复用的）规范实体（Type: Name）：\n"
             + "\n".join(existing_entities[:150])
             + "\n（若本文出现同一概念，请复用其规范名并把本文写法加入 aliases）"
         )
+    if recent_generic_warning:
+        parts.append(recent_generic_warning)
     parts.append(f"----------------\n论文段落：\n{text}\n----------------\n输出 JSON:")
     return "\n\n".join(parts)
 
@@ -288,6 +332,93 @@ def blend_confidence(model_conf: float, quality_q: float | None,
     return round(max(0.0, min(1.0, 0.6 * model_conf + 0.4 * qw)), 3)
 
 
+def flag_issues(data: dict[str, Any], min_conf: float = 0.6,
+                fallback_types=(GENERIC_FALLBACK_TYPES,),
+                max_items: int = 12) -> list[str]:
+    """找出需要二次精修的问题（低置信 / 泛化兜底关系 / 报告语实体）。"""
+    fb: set[str] = set()
+    for ft in fallback_types:
+        fb |= set(ft or ())
+    if not fb:
+        fb = set(GENERIC_FALLBACK_TYPES)
+    issues: list[str] = []
+    for i, e in enumerate(data.get("entities") or []):
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("name") or "").strip()
+        if not name:
+            issues.append(f"实体[{i}] name 为空")
+            continue
+        if is_reporting_phrase(name):
+            issues.append(
+                f"实体[{i}] name 疑似报告语/整句（ERROR LIST #1），"
+                f"应改为被陈述的核心事物名词: {name[:90]}")
+            continue
+        c = _conf(e.get("confidence"))
+        if c < min_conf:
+            issues.append(
+                f"实体[{i}] 「{name[:70]}」置信度偏低({c})：确为原文直接陈述则提高并保留证据，"
+                f"确为推断则如实低置信或删除")
+    for i, r in enumerate(data.get("relations") or []):
+        if not isinstance(r, dict):
+            continue
+        rt = str(r.get("type") or "").strip().lower()
+        subj = str(r.get("subject") or "")[:50]
+        obj = str(r.get("object") or "")[:50]
+        c = _conf(r.get("confidence"))
+        if rt in fb:
+            issues.append(
+                f"关系[{i}] 「{subj} --{rt}--> {obj}」语义偏泛化（ERROR LIST #3）："
+                f"请重读原文，能落到 promotes/inhibits/releases/differentiates_into/enables/"
+                f"regulates/activates/results_in 等具体关系就替换")
+            continue
+        if c < min_conf:
+            issues.append(f"关系[{i}] 「{subj} -{rt}-> {obj}」置信度偏低({c})")
+    for i, ev in enumerate(data.get("events") or []):
+        if not isinstance(ev, dict):
+            continue
+        c = _conf(ev.get("confidence"))
+        if c < min_conf:
+            tr = str(ev.get("trigger") or "")[:60]
+            issues.append(f"事件[{i}] 「{tr}」置信度偏低({c})")
+    return issues[: max(0, int(max_items))]
+
+
+REFINE_PROMPT = """你正在对一次知识抽取结果做“定向精修”（科研知识抽取流水线的反思环节，第二遍）。
+{header}
+
+原文（与首遍抽取相同的输入）：
+{text}
+
+首遍抽取结果（JSON——只处理下面被点名的问题，未点名的条目一律原样保留）：
+{first_json}
+
+首遍质检发现的问题：
+{issues}
+
+精修要求：
+1. 只处理上面点名的条目；其它条目的 type/name/confidence/evidence 一个字符都不许改。
+2. 粘住首遍抽取的意图（spirit）；除非有明显错误，否则不要重构、不要新增实体/关系/事件。
+3. 常见修复方式（按需采用）：
+   - 实体名是报告语/衔接语/整句（如 "These results suggest ..."）→ 改为被陈述的核心事物名词，
+     把原句放进 evidence；
+   - 泛称材料实际涵盖多种配方/掺杂/比例/工艺 → 拆分成独立实体，组成细节写入 attributes，
+     禁止把不同配方并入泛称造成细节丢失；
+   - related_to 等兜底关系若能落到更具体关系 → 替换为具体关系；
+   - 置信度偏低 → 确为原文直接陈述则提高并保留 evidence；确为推断则如实标低置信或删除；
+   - 同一概念与库中规范名不一致 → 改为规范名并补 aliases。
+4. 没有可改进项时：原样输出首遍 JSON（不增删改任何字符），并在 JSON 之后另起一行输出：
+   I am done
+5. 只输出精修后的 JSON 对象；不要代码块、不要解释、不要额外文字
+   （"I am done" 只能出现在 JSON 之后）。
+
+输出精修后的 JSON："""
+
+
+def _dump_json(data: dict[str, Any]) -> str:
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
 class KnowledgeExtractor:
     """按文本块调用模型并解析结构化结果。model 需有 invoke([HumanMessage])。"""
 
@@ -298,14 +429,95 @@ class KnowledgeExtractor:
             settings = _s
         self.settings = settings
 
+    def _run(self, prompt: str) -> dict[str, Any]:
+        """调用模型并解析 JSON；解析失败抛异常（由调用方决定回退策略）。"""
+        msg = self.model.invoke([HumanMessage(content=prompt)])
+        raw = msg.content if isinstance(msg, AIMessage) else str(getattr(msg, "content", msg))
+        return parse_model_json(raw)
+
     def extract(self, paragraphs: list[str],
                 paper_meta: dict[str, Any] | None = None,
-                existing_entities: list[str] | None = None) -> dict[str, Any]:
-        prompt = build_prompt(paragraphs, paper_meta, existing_entities)
+                existing_entities: list[str] | None = None,
+                recent_generic_warning: str | None = None) -> dict[str, Any]:
+        """单遍抽取（无精修），返回结构化 JSON。"""
+        prompt = build_prompt(paragraphs, paper_meta, existing_entities,
+                              recent_generic_warning)
         try:
-            msg = self.model.invoke([HumanMessage(content=prompt)])
-            raw = msg.content if isinstance(msg, AIMessage) else str(getattr(msg, "content", msg))
-            return parse_model_json(raw)
+            return self._run(prompt)
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM 抽取失败: %s", exc)
             return {"entities": [], "relations": [], "events": [], "error": str(exc)}
+
+    def extract_with_refine(self, paragraphs: list[str],
+                            paper_meta: dict[str, Any] | None = None,
+                            existing_entities: list[str] | None = None,
+                            recent_generic_warning: str | None = None,
+                            ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """首遍抽取 + 低置信/泛化关系定向精修（v0.0.6）。
+
+        返回 (最终 JSON, refine_stats)。精修解析失败/无改进时回退首遍结果，保证鲁棒。
+        """
+        s = self.settings
+        stats: dict[str, Any] = {
+            "refined": False, "issues": 0, "attempts": 0,
+            "converged": False, "failed_attempts": 0,
+        }
+        base_prompt = build_prompt(paragraphs, paper_meta, existing_entities,
+                                   recent_generic_warning)
+        try:
+            first = self._run(base_prompt)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM 抽取失败(首遍): %s", exc)
+            return {"entities": [], "relations": [], "events": [],
+                    "error": str(exc)}, stats
+
+        if not getattr(s, "knowledge_refine_enabled", True):
+            return first, stats
+
+        issues = flag_issues(
+            first,
+            min_conf=getattr(s, "refine_min_conf", 0.6),
+            fallback_types=(getattr(s, "generic_fallback_types",
+                                     GENERIC_FALLBACK_TYPES),),
+            max_items=getattr(s, "refine_max_items", 12),
+        )
+        stats["issues"] = len(issues)
+        if not issues:
+            return first, stats
+
+        text = "\n\n".join(paragraphs)
+        current = first
+        max_attempts = max(1, int(getattr(s, "refine_max_attempts", 2)))
+        for _ in range(max_attempts):
+            prompt = REFINE_PROMPT.format(
+                header=_paper_header(paper_meta),
+                text=text,
+                first_json=_dump_json(current),
+                issues="\n".join(f"- {it}" for it in issues),
+            )
+            try:
+                refined = self._run(prompt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("LLM 精修失败，回退首遍: %s", exc)
+                stats["failed_attempts"] += 1
+                break
+            stats["attempts"] += 1
+            if refined == current:
+                stats["converged"] = True
+                break
+            current = refined
+            stats["refined"] = True
+            next_issues = flag_issues(
+                refined,
+                min_conf=getattr(s, "refine_min_conf", 0.6),
+                fallback_types=(getattr(s, "generic_fallback_types",
+                                         GENERIC_FALLBACK_TYPES),),
+                max_items=getattr(s, "refine_max_items", 12),
+            )
+            if not next_issues or set(next_issues) == set(issues):
+                break
+            issues = next_issues
+        if stats["attempts"] and not stats["refined"] and not stats["converged"]:
+            # 出现精修调用但既未改进也未收敛（理论上不会走到这），如实记录
+            stats["converged"] = True
+        return current, stats

@@ -23,6 +23,13 @@ def _env_float(key: str, default: float) -> float:
         return default
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    raw = os.getenv(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass
 class Settings:
     """集中管理全流水线的路径与超参数。"""
@@ -62,6 +69,13 @@ class Settings:
     max_extract_chunks: int = 4     # 一篇论文最多抽取的文本块数（控制成本）
     q_flag_penalty: float = 0.85    # “标记后发送”的文献，质量权重折扣
     strong_edge_min_conf: float = 0.72  # 低于此阈值的强因果/调控边标记 candidate
+
+    # ---------- 知识提取·二次精修（v0.0.6） ----------
+    knowledge_refine_enabled: bool = True      # 是否允许“低置信/泛化关系”二次精修
+    refine_min_conf: float = 0.6               # 低于此置信度的实体/关系触发点名
+    refine_max_items: int = 12                 # 单轮最多点名的问题数（防提示词膨胀）
+    refine_max_attempts: int = 2               # 精修最多轮数（收敛信号提前结束）
+    generic_fallback_types: tuple = ("related_to",)  # 视为“语义过宽”的兜底关系
 
     # ---------- 网络 ----------
     http_timeout: int = 30
@@ -117,6 +131,12 @@ class Settings:
         s.a_hindex_weight = _env_float("RA_A_HINDEX_W", s.a_hindex_weight)
         s.a_citation_weight = _env_float("RA_A_CITATION_W", s.a_citation_weight)
         s.max_meta_attempts = int(os.getenv("RA_MAX_META_ATTEMPTS", s.max_meta_attempts))
+        s.knowledge_refine_enabled = _env_bool(
+            "RA_KNOWLEDGE_REFINE", s.knowledge_refine_enabled)
+        s.refine_min_conf = _env_float("RA_REFINE_MIN_CONF", s.refine_min_conf)
+        s.refine_max_items = int(os.getenv("RA_REFINE_MAX_ITEMS", s.refine_max_items))
+        s.refine_max_attempts = int(
+            os.getenv("RA_REFINE_MAX_ATTEMPTS", s.refine_max_attempts))
         db = os.getenv("RA_DB_PATH")
         if db:
             s.db_path = Path(db)
