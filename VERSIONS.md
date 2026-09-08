@@ -19,4 +19,4 @@ research-agent（LangGraph 多模型科研辅助 Agent）本地提交版本索�
 
 | v0.1.0 | dd9ab247ff9f4909b2993cf988639cd5c51117c6 | 里程碑版本：研究任务四节点 + 金标准 pilot + 提示词清单/审阅文档 + 模型绑定统一为 DeepSeek V4 Flash / GLM 4.7 Flash 审核 |
 | v0.1.1 | 2230cd7d56f15fb07d81f4bce318630ded07aa0f | P1 领域画像优化：工作规划生成 DomainProfile、检索不再内置生物医药维度、质量缺失数据不估计、知识抽取支持领域候选/冻结 schema |
-| v0.1.2 | 提交后登记 | 通用生成型任务支持：planner 识别 generative 任务、consumer 输出 design_context、content 生成候选 strategies、reviewer 增加创新充分性检查 |
+| v0.1.2 | 0ad8b9ea3ded37c063c7c731d24dd7d1e5ce1097 | 通用生成型任务支持：planner 识别 generative 任务、consumer 输出 design_context、content 生成候选 strategies、reviewer 增加创新充分性检查 |
