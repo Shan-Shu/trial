@@ -27,7 +27,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     app = FastAPI(
         title="research-agent 看板",
         description="动态本体图谱 + 智能体工作状态 + 输入输出",
-        version="0.1.1",
+        version="0.1.2",
     )
     app.state.db_path = _db
 

@@ -1,7 +1,6 @@
-# 当前 LLM 提示词清单（v0.1.1）
+# 当前 LLM 提示词清单（v0.1.2）
 
-> 生成自各节点的 Python 常量，未手工改写。提示词均以单条 HumanMessage 发送；
-> `{}` 为运行时替换占位符。
+> 生成自各节点的 Python 常量，未手工改写。
 
 ## 模型绑定
 
@@ -396,11 +395,16 @@ predicate 字段可补充具体内容，但避免重复动词。
 
 硬性要求：
 1. 不要生成内容大纲，不要预设章节，不要预判研究结论；
-2. 重点是把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
-3. seed_terms 必须是英文检索词，覆盖领域核心词、方法/催化剂/机理、评价与应用词；
+2. 先判断任务性质：summary(综述/调研)、generative(提出新方法/新方案/新设计)、
+   frontier(前沿探索)、evaluation(评估/比较/选择)；
+3. 对 generative 任务，必须输出 creative_contract，说明需要生成什么、
+   可以组合哪些方向、最少生成几个候选、如何判断“不是简单复述”；
+4. 再把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
+5. 领域画像可随任务生成，但任务性质和生成要求必须是领域无关的；
+6. seed_terms 必须是英文检索词，覆盖领域核心词、方法/机理、评价与应用词；
    禁止把用户整句话直接作为 seed_terms 或 domain；
-4. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
-5. 只输出 JSON 对象，不要代码块，不要解释。
+7. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
+8. 只输出 JSON 对象，不要代码块，不要解释。
 
 示例（只参考字段风格，不要照抄用户原话作为 domain/seed_terms）：
 用户原话：尝试提出一种炔酰胺构建多元氮杂化合物的新方法
@@ -417,6 +421,15 @@ predicate 字段可补充具体内容，但避免重复动词。
   "goal": "一句话目标",
   "domain": "研究领域",
   "content_type": "research_report|frontier_review|research_directions|experiment_protocol",
+  "task_kind": "summary|generative|frontier|evaluation",
+  "creative_contract": {{
+    "objective": "用户期望获得的新对象/新方案描述",
+    "focus": "研究或设计焦点",
+    "min_candidates": 3,
+    "creative_operations": ["组合已有方案", "跨域迁移", "替换组件", "扩展对象范围"],
+    "constraints": ["不能只复述已有方案", "必须区分假设与已知事实"],
+    "evaluation_criteria": ["新颖性", "可行性", "可解释性", "可验证性"]
+  }},
   "domain_profile": {{
     "domain_kind": "chemistry|biomedicine|materials|general",
     "dimensions": ["该领域应覆盖的检索/分析维度"],
@@ -442,8 +455,8 @@ predicate 字段可补充具体内容，但避免重复动词。
 
 请直接输出可解析的 JSON：
 
-注意：domain_profile.dimensions 必须针对领域真实需要，例如化学领域写
-“催化、底物范围、区域/立体选择性、机理、产率”，不要写“适应症/临床转化”等无关维度。
+注意：creative_contract 必须用领域无关语言描述“生成什么、如何生成、如何评价”，
+domain_profile 才用来实例化领域词汇。
 ```
 
 ## 五、内容形成节点
@@ -497,6 +510,44 @@ knowledge:
 请直接输出 JSON：
 ```
 
+### 5.2 GENERATIVE_BLOCK（generative 任务追加）
+
+```text
+
+附加生成要求：
+当前任务为 generative，不能只做“文献归纳”。你必须在 sections 之外额外生成
+strategies 数组，至少 {min_candidates} 个差异化的候选方案。
+
+每个候选方案应说明：
+1. 目标：希望得到的新对象/新方法/新框架；
+2. 使用的已有组件或方法；
+3. 采用的创造操作（组合、迁移、替换、扩展、设计流水线等）；
+4. 创新来源：为什么不是已有方案的同义改写；
+5. 依据：哪些 pattern/evidence 支持其组成部件；
+6. status 必须为 hypothesis。
+
+strategies JSON 结构：
+{{
+  "strategies": [
+    {{
+      "id": "S-01",
+      "title": "候选方案名称",
+      "target": "目标对象/方案",
+      "components": ["已有组件A", "已有组件B"],
+      "creative_operation": "组合/迁移/替换/扩展/新流水线",
+      "novelty_source": "为什么新",
+      "rationale": "为什么可能可行",
+      "pattern_ids": [],
+      "evidence_ids": [],
+      "status": "hypothesis",
+      "risks": [],
+      "validation_plan": "如何验证"
+    }}
+  ]
+}}
+
+```
+
 ## 六、审核校对节点
 
 ### 6.1 REVIEW_PROMPT
@@ -517,6 +568,11 @@ knowledge:
 4. 草稿不得新增 knowledge 之外的引用或来源；
 5. 若只是缺少证据，请指出 location，并让内容节点改为 revise 或标记 open_question；
 6. 若任务需要的领域在当前语料中没有覆盖，返回 need_more_data 并说明缺口。
+
+当 task_plan.task_kind="generative" 时，额外检查：
+7. strategies 数量不得少于 creative_contract.min_candidates；
+8. 每个 strategy 必须有目标、创造操作、组件依据和待验证计划；
+9. 不能只复述已有模式，候选之间应有差异化的生成逻辑。
 
 只输出 JSON 对象：
 {{

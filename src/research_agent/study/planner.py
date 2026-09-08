@@ -27,11 +27,16 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
 
 硬性要求：
 1. 不要生成内容大纲，不要预设章节，不要预判研究结论；
-2. 重点是把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
-3. seed_terms 必须是英文检索词，覆盖领域核心词、方法/催化剂/机理、评价与应用词；
+2. 先判断任务性质：summary(综述/调研)、generative(提出新方法/新方案/新设计)、
+   frontier(前沿探索)、evaluation(评估/比较/选择)；
+3. 对 generative 任务，必须输出 creative_contract，说明需要生成什么、
+   可以组合哪些方向、最少生成几个候选、如何判断“不是简单复述”；
+4. 再把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
+5. 领域画像可随任务生成，但任务性质和生成要求必须是领域无关的；
+6. seed_terms 必须是英文检索词，覆盖领域核心词、方法/机理、评价与应用词；
    禁止把用户整句话直接作为 seed_terms 或 domain；
-4. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
-5. 只输出 JSON 对象，不要代码块，不要解释。
+7. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
+8. 只输出 JSON 对象，不要代码块，不要解释。
 
 示例（只参考字段风格，不要照抄用户原话作为 domain/seed_terms）：
 用户原话：尝试提出一种炔酰胺构建多元氮杂化合物的新方法
@@ -48,6 +53,15 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
   "goal": "一句话目标",
   "domain": "研究领域",
   "content_type": "research_report|frontier_review|research_directions|experiment_protocol",
+  "task_kind": "summary|generative|frontier|evaluation",
+  "creative_contract": {{
+    "objective": "用户期望获得的新对象/新方案描述",
+    "focus": "研究或设计焦点",
+    "min_candidates": 3,
+    "creative_operations": ["组合已有方案", "跨域迁移", "替换组件", "扩展对象范围"],
+    "constraints": ["不能只复述已有方案", "必须区分假设与已知事实"],
+    "evaluation_criteria": ["新颖性", "可行性", "可解释性", "可验证性"]
+  }},
   "domain_profile": {{
     "domain_kind": "chemistry|biomedicine|materials|general",
     "dimensions": ["该领域应覆盖的检索/分析维度"],
@@ -73,8 +87,8 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
 
 请直接输出可解析的 JSON：
 
-注意：domain_profile.dimensions 必须针对领域真实需要，例如化学领域写
-“催化、底物范围、区域/立体选择性、机理、产率”，不要写“适应症/临床转化”等无关维度。"""
+注意：creative_contract 必须用领域无关语言描述“生成什么、如何生成、如何评价”，
+domain_profile 才用来实例化领域词汇。"""
 
 
 def infer_content_type(request: str) -> str:
@@ -91,12 +105,82 @@ def infer_content_type(request: str) -> str:
     return "research_report"
 
 
+GENERATIVE_HINTS = (
+    "提出", "propose", "new method", "新方法", "新方案", "设计", "框架",
+    "new framework", "新框架", "候选", "策略", "approach",
+)
+SUMMARY_HINTS = ("综述", "总结", "review", "summarize", "调研")
+FRONTIER_HINTS = ("前沿", "最新", "进展", "趋势", "frontier")
+EVALUATION_HINTS = ("评估", "比较", "对比", "选择", "evaluate", "compare")
+
+
+def infer_task_kind(request: str) -> str:
+    text = request.lower()
+    if any(k in text for k in GENERATIVE_HINTS):
+        return "generative"
+    if any(k in text for k in EVALUATION_HINTS):
+        return "evaluation"
+    if any(k in text for k in FRONTIER_HINTS):
+        return "frontier"
+    if any(k in text for k in SUMMARY_HINTS):
+        return "summary"
+    return "generative"
+
+
+def normalize_creative_contract(data: dict[str, Any] | None,
+                                request: str,
+                                domain: str) -> dict[str, Any]:
+    """领域无关的生成任务契约：说明生成什么、如何生成、如何评价。"""
+    raw = data or {}
+    objective = clean_str(raw.get("objective"), request)
+    focus = clean_str(raw.get("focus"), domain or objective)
+    operations = [
+        clean_str(x) for x in raw.get("creative_operations") or []
+        if clean_str(x)
+    ]
+    if not operations:
+        operations = [
+            "组合已有方案/方法",
+            "把已有方法迁移到新的对象或场景",
+            "替换或改造成分/组件/条件",
+            "扩展原有方案到更一般情形",
+            "设计新的顺序或流水线",
+        ]
+    criteria = [
+        clean_str(x) for x in raw.get("evaluation_criteria") or []
+        if clean_str(x)
+    ]
+    if not criteria:
+        criteria = ["新颖性", "可行性", "可解释性", "可验证性"]
+    constraints = [
+        clean_str(x) for x in raw.get("constraints") or []
+        if clean_str(x)
+    ]
+    if not constraints:
+        constraints = [
+            "不能只复述已有方案",
+            "组合的每一部分应可追溯",
+            "整体候选应标记为待验证假设",
+        ]
+    return {
+        "objective": objective,
+        "focus": focus,
+        "min_candidates": max(1, int(raw.get("min_candidates") or 3)),
+        "creative_operations": operations,
+        "constraints": constraints,
+        "evaluation_criteria": criteria,
+    }
+
+
 def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
     """补全缺失字段，保证后续节点拿到统一结构。"""
     raw = data or {}
     goal = clean_str(raw.get("goal"), request)
     domain = clean_str(raw.get("domain"), goal)
     content_type = clean_str(raw.get("content_type"), infer_content_type(request))
+    task_kind = clean_str(raw.get("task_kind"), infer_task_kind(request)).lower()
+    if task_kind not in ("summary", "generative", "frontier", "evaluation"):
+        task_kind = infer_task_kind(request)
     mission_raw = raw.get("mission") or {}
     terms = [clean_str(t) for t in mission_raw.get("seed_terms") or [] if clean_str(t)]
     if not terms:
@@ -114,10 +198,16 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
     if not analysis:
         analysis = ["方法", "材料", "性能指标", "应用", "开放问题"]
     deliverable = raw.get("deliverable") or {}
+    creative_contract = None
+    if task_kind == "generative":
+        creative_contract = normalize_creative_contract(
+            raw.get("creative_contract"), request, domain)
     return {
         "goal": goal,
         "domain": domain,
         "content_type": content_type,
+        "task_kind": task_kind,
+        "creative_contract": creative_contract,
         "domain_profile": normalize_domain_profile(
             raw.get("domain_profile"), domain, request),
         "analysis_targets": analysis,
@@ -174,6 +264,9 @@ def make_planner_node(model=None,
                 "goal": plan.get("goal"),
                 "domain": plan.get("domain"),
                 "content_type": plan.get("content_type"),
+                "task_kind": plan.get("task_kind"),
+                "min_candidates": ((plan.get("creative_contract") or {})
+                                   .get("min_candidates")),
                 "seed_terms": plan.get("mission", {}).get("seed_terms"),
                 "max_results": plan.get("mission", {}).get("max_results"),
             })

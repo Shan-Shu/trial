@@ -175,6 +175,57 @@ def build_retrieval_request(plan: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def build_design_context(knowledge: dict[str, Any],
+                         plan: dict[str, Any] | None = None) -> dict[str, Any]:
+    """从消费到的模式/证据中提取通用“可组合设计素材”。"""
+    patterns = knowledge.get("patterns") or []
+    evidence = knowledge.get("evidence") or []
+    component_type_count: dict[str, int] = {}
+    components: dict[str, dict[str, Any]] = {}
+    relation_count: dict[str, int] = {}
+    for p in patterns:
+        for side, typ, name in (
+                ("source", p.get("source_type"), p.get("source_name")),
+                ("target", p.get("target_type"), p.get("target_name"))):
+            component_type_count[typ] = component_type_count.get(typ, 0) + 1
+            key = f"{typ}:{name}"
+            comp = components.setdefault(key, {
+                "type": typ, "name": name, "relation_degree": 0,
+                "pattern_ids": [], "evidence_ids": [],
+            })
+            comp["relation_degree"] += 1
+            comp["pattern_ids"].append(p["pattern_id"])
+        relation_count[p["relation_type"]] = relation_count.get(
+            p["relation_type"], 0) + 1
+    evidence_by_pattern: dict[str, list[str]] = {}
+    for e in evidence:
+        evidence_by_pattern.setdefault(e["pattern_id"], []).append(e["evidence_id"])
+    for p in patterns:
+        for comp_key in (
+                f"{p.get('source_type')}:{p.get('source_name')}",
+                f"{p.get('target_type')}:{p.get('target_name')}"):
+            if comp_key in components:
+                components[comp_key]["evidence_ids"].extend(
+                    evidence_by_pattern.get(p["pattern_id"], []))
+    weak_count = sum(1 for p in patterns if int(p.get("support_count") or 0) < 3)
+    return {
+        "objective_hint": clean_str((plan or {}).get("goal")),
+        "component_types": component_type_count,
+        "composable_relations": relation_count,
+        "candidate_components": sorted(
+            list(components.values()),
+            key=lambda c: (c["relation_degree"], len(c["evidence_ids"])),
+            reverse=True,
+        )[:120],
+        "known_limits": {
+            "weak_patterns": weak_count,
+            "strong_patterns": len(patterns) - weak_count,
+        },
+        "combination_space_hint": "将不同 component_type 中的候选组件与 "
+                                  "composable_relations 中关系进行组合/替换/迁移。",
+    }
+
+
 def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
                                  settings: Settings | None = None,
                                  collector: Callable[[dict[str, Any]], dict] | None = None):
@@ -218,6 +269,7 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
                     "force_collect": False,
                     "status": "needs_collection",
                 }
+            bundle["design_context"] = build_design_context(bundle, plan)
             log_study_event(
                 conn, settings, "knowledge_consumer", run_id, "done",
                 {

@@ -35,6 +35,11 @@ REVIEW_PROMPT = """你是科研内容审核校对节点。你的职责不是补�
 5. 若只是缺少证据，请指出 location，并让内容节点改为 revise 或标记 open_question；
 6. 若任务需要的领域在当前语料中没有覆盖，返回 need_more_data 并说明缺口。
 
+当 task_plan.task_kind="generative" 时，额外检查：
+7. strategies 数量不得少于 creative_contract.min_candidates；
+8. 每个 strategy 必须有目标、创造操作、组件依据和待验证计划；
+9. 不能只复述已有模式，候选之间应有差异化的生成逻辑。
+
 只输出 JSON 对象：
 {{
   "decision": "pass|revise|need_more_data",
@@ -75,6 +80,47 @@ def deterministic_review(plan: dict[str, Any],
     """无模型时的确定性审核：只做引用存在性和 supported 证据门控。"""
     pattern_ids, evidence_ids = _reference_sets(knowledge)
     issues: list[dict[str, Any]] = []
+    contract = plan.get("creative_contract")
+    if plan.get("task_kind") == "generative" and contract:
+        strategies = draft.get("strategies") or []
+        min_n = max(1, int(contract.get("min_candidates") or 3))
+        if len(strategies) < min_n:
+            issues.append({
+                "severity": "critical",
+                "type": "coverage_gap",
+                "location": "strategies",
+                "problem": f"generative 任务要求至少 {min_n} 个候选，"
+                           f"实际只有 {len(strategies)} 个",
+            })
+        seen_operations = set()
+        for si, s in enumerate(strategies):
+            loc = f"strategies[{si}]"
+            refs = {str(x) for x in s.get("pattern_ids") or []}
+            evs = {str(x) for x in s.get("evidence_ids") or []}
+            if refs - pattern_ids or evs - evidence_ids:
+                issues.append({
+                    "severity": "critical",
+                    "type": "bad_reference",
+                    "location": loc,
+                    "problem": "候选方案引用了不存在或不在本轮 knowledge 中的 ID",
+                })
+            if not evs and not refs:
+                issues.append({
+                    "severity": "critical",
+                    "type": "missing_evidence",
+                    "location": loc,
+                    "problem": "候选方案没有任何组件依据",
+                })
+            op = clean_str(s.get("creative_operation"))
+            if op:
+                seen_operations.add(op)
+        if strategies and len(seen_operations) < 2:
+            issues.append({
+                "severity": "minor",
+                "type": "other",
+                "location": "strategies",
+                "problem": "候选方案缺乏足够差异化的创造操作，疑似同义改写",
+            })
     sections = draft.get("sections") or []
     if not sections:
         issues.append({

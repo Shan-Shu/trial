@@ -10,7 +10,9 @@ from research_agent.domains import normalize_domain_profile
 from research_agent.knowledge.extractor import build_prompt
 from research_agent.quality.llm import QUALITY_PROMPT_TEMPLATE
 from research_agent.retrieval.llm import RetrievalLLM, PLAN_PROMPT_TEMPLATE
+from research_agent.study.content import deterministic_draft
 from research_agent.study.planner import deterministic_plan
+from research_agent.study.reviewer import deterministic_review
 
 
 class DomainProfileTest(unittest.TestCase):
@@ -22,6 +24,38 @@ class DomainProfileTest(unittest.TestCase):
         self.assertIn("催化剂与试剂", profile["dimensions"])
         self.assertIn("Reaction", profile["candidate_entity_types"])
         self.assertIn("catalyzed_by", profile["candidate_relation_types"])
+
+    def test_generative_plan_contains_creative_contract(self):
+        plan = deterministic_plan("提出一个新的数据处理方法")
+        self.assertEqual(plan["task_kind"], "generative")
+        self.assertGreaterEqual(plan["creative_contract"]["min_candidates"], 3)
+        self.assertTrue(any("组合" in op for op in
+                            plan["creative_contract"]["creative_operations"]))
+
+    def test_deterministic_generative_draft_passes_review(self):
+        plan = deterministic_plan("提出一个新的数据分析框架")
+        knowledge = {
+            "patterns": [
+                {"pattern_id": "P-0001", "relation_type": "uses",
+                 "source_type": "Method", "source_name": "A",
+                 "target_type": "Task", "target_name": "B",
+                 "evidence_ids": ["E-0001-1"], "support_count": 1},
+                {"pattern_id": "P-0002", "relation_type": "enables",
+                 "source_type": "Method", "source_name": "C",
+                 "target_type": "Application", "target_name": "D",
+                 "evidence_ids": ["E-0002-1"], "support_count": 2},
+            ],
+            "evidence": [
+                {"evidence_id": "E-0001-1", "pattern_id": "P-0001",
+                 "paper_key": "p1", "sentence": "A uses B."},
+                {"evidence_id": "E-0002-1", "pattern_id": "P-0002",
+                 "paper_key": "p2", "sentence": "C enables D."},
+            ],
+        }
+        draft = deterministic_draft(plan, knowledge)
+        self.assertGreaterEqual(len(draft.get("strategies") or []), 3)
+        review = deterministic_review(plan, draft, knowledge)
+        self.assertEqual(review["decision"], "pass")
 
     def test_normalize_profile_falls_back(self):
         p = normalize_domain_profile(

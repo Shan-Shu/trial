@@ -359,6 +359,8 @@ def study_status(db_path: Path | str | None = None,
                     "goal": det.get("goal"),
                     "domain": det.get("domain"),
                     "content_type": det.get("content_type"),
+                    "task_kind": det.get("task_kind"),
+                    "min_candidates": det.get("min_candidates"),
                     "seed_terms": det.get("seed_terms"),
                 }
             elif ev["event"] == "knowledge_consumer":
