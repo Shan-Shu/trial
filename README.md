@@ -352,3 +352,44 @@ uv run research-agent-pipeline --query "..." --source both
 
 备注：NCBI 无 Key 限速 ≤3 req/s，代码内置 `delay=0.35s`；如申请了 NCBI Key，
 设环境变量 `NCBI_API_KEY` 可提速。
+
+## 12. 四节点研究任务层（规划 / 知识消费 / 内容形成 / 审核校对）
+
+在既有“检索 -> 质量 -> 知识”建库流水线上增加一层面向研究任务的高层编排。
+知识消费节点不直接由 LLM 查库：它从动态本体读取可溯源模式卡/证据卡，
+语料不足时向现有数据流水线发出补集请求。
+
+```text
+planner ──> knowledge_consumer ──> content_builder ──> reviewer
+                │  语料不足              ▲                  │
+                └── 调用现有 pipeline ────┴─ revise ─────────┘
+```
+
+目录：
+
+```text
+src/research_agent/study/
+├── planner.py     # 工作规划节点：模糊请求 -> 语料采集任务单
+├── consumer.py    # 知识消费节点：动态本体 -> 模式卡/证据卡
+├── content.py     # 内容形成节点：模式卡/证据卡 -> 可溯源草稿
+├── reviewer.py    # 审核校对节点：引用存在性/支持度门控
+├── collection.py  # 与现有 retrieval->quality->knowledge 的补集桥接
+└── graph.py       # LangGraph 编排与 CLI
+```
+
+使用：
+
+```powershell
+# 离线确定性运行（不调用 LLM，验证四节点编排）
+uv run research-agent-study --request "骨修复支架前沿" --db data\ontology_v05.db --llm-smoke
+
+# 真实模型运行：规划 DeepSeek V4 Flash / 内容 DeepSeek V4 Pro / 审核 GLM 4.7 Flash
+uv run research-agent-study --request "RAG 2024-2026 前沿综述" --db data\ontology_v05.db
+
+# 先调用现有检索/质量/知识流水线补充语料，再进入四节点
+uv run research-agent-study --request "..." --collect
+```
+
+角色可在 `.env` 中通过 `PLANNER_MODEL / CONTENT_MODEL / REVIEW_MODEL` 覆盖。
+知识消费节点返回的每一条证据均带 `paper_key`、原文句和 `evidence_id`；
+审核节点只允许草稿引用这些真实 ID，禁止内容形成节点自造来源。

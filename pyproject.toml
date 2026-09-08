@@ -1,6 +1,6 @@
 [project]
 name = "research-agent"
-version = "0.0.6"
+version = "0.1.0"
 description = "基于 LangGraph 的多模型协作科研辅助 Agent（多模型编排/科研检索/PDF 解析）"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,6 +27,7 @@ dependencies = [
 research-agent = "research_agent:main"
 research-agent-pipeline = "research_agent.pipeline:main"
 research-agent-dashboard = "research_agent.dashboard.app:main"
+research-agent-study = "research_agent.study.graph:main"
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]

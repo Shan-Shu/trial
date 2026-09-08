@@ -1,10 +1,8 @@
-"""多模型提供商工厂 + 三节点“角色 → LLM”绑定。
+"""多模型提供商工厂 + “角色 → LLM”绑定。
 
-三个节点分别绑定（可在 .env 覆盖）:
-- 文献检索节点  → DeepSeek V4（默认 deepseek-v4-pro，DeepSeek 官方 API）
-- 质量评估节点  → GLM 4.7 Flash（glm-4.7-flash，智谱 BigModel）
-- 知识提取节点  → DeepSeek V4 Pro（deepseek-v4-pro；临时替代 OpenAI gpt-5.6，
-  因当前网络无法访问 api.openai.com，可随时用 ROLE_PROVIDER_KNOWLEDGE/openai 切回）
+模型分工约定（用户指定）：
+- 审核校对节点  → GLM 4.7 Flash（glm-4.7-flash，智谱 BigModel）
+- 其余 LLM 节点 → DeepSeek V4 Flash（deepseek-v4-flash）
 """
 from __future__ import annotations
 
@@ -27,28 +25,43 @@ SUPPORTED_PROVIDERS: dict[str, str] = {
 # 节点角色 → LLM 默认绑定（provider / model / 所需 API Key）
 ROLE_PROVIDER = {
     "retriever": "deepseek",
-    "quality": "glm",
-    "knowledge": "deepseek",   # 临时：用 DeepSeek V4 Pro 替代 OpenAI gpt-5.6
+    "quality": "deepseek",
+    "knowledge": "deepseek",
+    "planner": "deepseek",
+    "content": "deepseek",
+    "review": "glm",
 }
 ROLE_MODEL_ENV = {
     "retriever": "RETRIEVAL_MODEL",
     "quality": "QUALITY_MODEL",
     "knowledge": "KNOWLEDGE_MODEL",
+    "planner": "PLANNER_MODEL",
+    "content": "CONTENT_MODEL",
+    "review": "REVIEW_MODEL",
 }
 ROLE_MODEL_DEFAULT = {
-    "retriever": "deepseek-v4-pro",   # DeepSeek V4（可换 deepseek-v4-flash）
-    "quality": "glm-4.7-flash",       # GLM 4.7 Flash
-    "knowledge": "deepseek-v4-pro",   # 临时：DeepSeek V4 Pro 替代 gpt-5.6
+    "retriever": "deepseek-v4-flash",
+    "quality": "deepseek-v4-flash",
+    "knowledge": "deepseek-v4-flash",
+    "planner": "deepseek-v4-flash",
+    "content": "deepseek-v4-flash",
+    "review": "glm-4.7-flash",
 }
 ROLE_KEY_ENV = {
     "retriever": "DEEPSEEK_API_KEY",
-    "quality": "ZHIPU_API_KEY",
+    "quality": "DEEPSEEK_API_KEY",
     "knowledge": "DEEPSEEK_API_KEY",
+    "planner": "DEEPSEEK_API_KEY",
+    "content": "DEEPSEEK_API_KEY",
+    "review": "ZHIPU_API_KEY",
 }
 ROLE_LABEL = {
     "retriever": "文献检索节点",
     "quality": "质量评估节点",
     "knowledge": "知识提取节点",
+    "planner": "工作规划节点",
+    "content": "内容形成节点",
+    "review": "审核校对节点",
 }
 
 
@@ -84,6 +97,9 @@ def build_chat_model(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url="https://api.deepseek.com",
             temperature=temperature,
+            max_tokens=8000,
+            reasoning_effort=os.getenv("DEEPSEEK_REASONING_EFFORT", "low"),
+            max_retries=5,
         )
 
     if provider == "qwen":
@@ -104,6 +120,8 @@ def build_chat_model(
             api_key=os.getenv("ZHIPU_API_KEY") or os.getenv("GLM_API_KEY"),
             base_url="https://open.bigmodel.cn/api/paas/v4",
             temperature=temperature,
+            max_tokens=8000,
+            max_retries=5,
         )
 
     if provider == "anthropic":
