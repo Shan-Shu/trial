@@ -244,7 +244,8 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
 
 def make_knowledge_node(model=None,
                         conn: sqlite3.Connection | None = None,
-                        settings: Settings | None = None):
+                        settings: Settings | None = None,
+                        run_init: bool = True):
     """构造 LangGraph 知识提取节点。model 为 None 时跳过抽取（仅统计预处理）。"""
     settings = settings or default_settings
 
@@ -255,7 +256,8 @@ def make_knowledge_node(model=None,
         own_conn = conn is None
         db = conn or connect(settings.db_path)
         try:
-            init_ontology(db)
+            if run_init:
+                init_ontology(db)
             rec = get_paper(db, key)
             if not rec:
                 return {"error": f"文献不存在: {key}", "status": "error"}
