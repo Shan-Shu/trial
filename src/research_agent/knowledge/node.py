@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from typing import Any
 
@@ -18,10 +19,13 @@ from research_agent.knowledge.preprocess import (
     split_sentences,
 )
 from research_agent.ontology.store import (
+    STRONG_RELATIONS,
+    add_event_assertion,
     get_node_id,
     graph_summary,
     init_ontology,
     record_ontology_run,
+    register_material,
     upsert_edge,
     upsert_node,
 )
@@ -40,9 +44,26 @@ def _lookup_any_type(conn: sqlite3.Connection, name: str) -> int | None:
     return int(row["node_id"]) if row else None
 
 
+def _evidence_tier(title: str | None) -> str:
+    t = (title or "").lower()
+    if t.startswith(("comment", "corrigendum", "erratum", "editorial",
+                     "retraction", "addendum")):
+        return "commentary"
+    if "review" in t[:90] or t.startswith("a systematic review"):
+        return "review"
+    if re.search(r"clinical trial|case series|case report|randomized|cohort|meta-analysis", t):
+        return "clinical"
+    if re.search(r"in vivo|rat |mice|mouse|rabbit|canine|porcine|animal", t):
+        return "primary_in_vivo"
+    if re.search(r"in vitro|cell culture|osteoblast|cells? ", t):
+        return "primary_in_vitro"
+    return "primary"
+
+
 def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                       quality_q: float | None, flagged: bool,
-                      paper_key: str, settings: Settings) -> dict[str, Any]:
+                      paper_key: str, settings: Settings,
+                      evidence_tier: str | None = None) -> dict[str, Any]:
     """把一次抽取结果写入本体，返回统计（新增节点/边/类型）。"""
     stats = {"entities": 0, "relations": 0, "events": 0,
              "new_nodes": 0, "new_edges": 0, "new_types": [],
@@ -72,6 +93,20 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             conn, node_type=ntype, name=name, confidence=conf,
             aliases=aliases, attributes=attrs, provenance=prov,
         )
+        if ntype == "Material":
+            local_id = register_material(
+                conn, name, synonyms=aliases,
+                composition=attrs if isinstance(attrs, dict) else None)
+            row = conn.execute(
+                "SELECT external_source FROM ontology_nodes WHERE node_id=?",
+                (node_id,),
+            ).fetchone()
+            if not row or not row["external_source"]:
+                conn.execute(
+                    "UPDATE ontology_nodes SET identity_key=?, external_source='local', "
+                    "term_status='local_uncurated' WHERE node_id=?",
+                    (local_id, node_id),
+                )
         name_to_id[(ntype, name.lower())] = node_id
         name_to_id[("*", name.lower())] = node_id
         stats["entities"] += 1
@@ -100,10 +135,13 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
         attrs = {"predicate": str(r.get("predicate") or "")}
+        if rtype in STRONG_RELATIONS and conf < settings.strong_edge_min_conf:
+            attrs["candidate"] = True
         prov = [{"paper": paper_key, "evidence": str(r.get("evidence") or "")[:500]}]
         _, is_new = upsert_edge(
             conn, relation_type=rtype, src_id=src, tgt_id=tgt,
             confidence=conf, attributes=attrs, provenance=prov,
+            evidence_tier=evidence_tier,
         )
         stats["relations"] += 1
         stats["new_edges"] += int(is_new)
@@ -117,37 +155,27 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         if is_reporting_phrase(trigger) or is_reporting_phrase(etype):
             stats["dropped_garbage"] += 1
             continue
-        # 事件名用名词式“类型: 参与者”，避免把整句/报告语当节点名
-        if participants:
-            name = f"{etype}: {participants[0]}"
-            if len(participants) > 1:
-                name += f" 等 {len(participants)} 项"
-        else:
-            name = f"{etype}#{ev_idx}"
         try:
             model_conf = float(ev.get("confidence") or 0.5)
         except (TypeError, ValueError):
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
-        attrs = {"time": ev.get("time"), "trigger": trigger[:300]}
+        attrs = {"time": ev.get("time")}
         if isinstance(ev.get("attributes"), dict):
             attrs.update(ev["attributes"])
         prov = [{"paper": paper_key, "evidence": str(ev.get("evidence") or "")[:500]}]
-        event_id, ev_is_new = upsert_node(
-            conn, node_type=etype, name=name, confidence=conf,
-            aliases=[], attributes=attrs, provenance=prov,
-        )
-        stats["events"] += 1
-        stats["new_nodes"] += int(ev_is_new)
+        refs = []
         for participant in participants:
             pid = _resolve(str(participant))
-            if pid is None:
-                continue
-            _, e_new = upsert_edge(
-                conn, relation_type="involves", src_id=pid, tgt_id=event_id,
-                confidence=conf, attributes={}, provenance=prov,
-            )
-            stats["new_edges"] += int(e_new)
+            if pid is not None:
+                refs.append(pid)
+        add_event_assertion(
+            conn, paper_key=paper_key, event_type=etype, trigger=trigger[:300],
+            participants=participants, entity_refs=refs,
+            time_text=ev.get("time"), attributes=attrs, confidence=conf,
+            provenance=prov,
+        )
+        stats["events"] += 1
     return stats
 
 
@@ -198,6 +226,7 @@ def make_knowledge_node(model=None,
                         "status": "extracted"}
 
             extractor = KnowledgeExtractor(model, settings)
+            tier = _evidence_tier(rec.get("title"))
             existing_entities = [
                 r["label"] for r in db.execute(
                     """
@@ -219,7 +248,7 @@ def make_knowledge_node(model=None,
                 data = extractor.extract(chunk, meta, existing_entities)
                 chunk_stats = _upsert_knowledge(
                     db, data, quality_q=quality_q, flagged=flagged,
-                    paper_key=key, settings=settings,
+                    paper_key=key, settings=settings, evidence_tier=tier,
                 )
                 for k in ("entities", "relations", "events", "new_nodes",
                           "new_edges", "dropped_garbage"):

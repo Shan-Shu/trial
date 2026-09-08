@@ -270,12 +270,18 @@ class KnowledgeExtractionTest(unittest.TestCase):
         self.assertGreaterEqual(ext["relations"], 2)
         self.assertGreaterEqual(ext["events"], 1)
         s = ont.graph_summary(self.conn)
-        self.assertGreaterEqual(s["nodes"], 4)
-        self.assertGreaterEqual(s["edges"], 3)
-        # 动态类型（如 involves/Experiment）已被注册
-        types = {r["type_key"] for r in self.conn.execute(
-            "SELECT type_key FROM ontology_type_registry")}
-        self.assertIn("involves", types)
+        # v0.0.5：事件写入旁路表，不再生成事件节点/星型 involves 边
+        self.assertGreaterEqual(s["nodes"], 3)
+        self.assertGreaterEqual(s["edges"], 2)
+        ev = self.conn.execute(
+            "SELECT COUNT(*) FROM event_assertions WHERE paper_key=?",
+            (rec["paper_key"],),
+        ).fetchone()[0]
+        self.assertEqual(ev, 1)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM ontology_nodes WHERE node_type='Experiment'"
+            ).fetchone()[0], 0)
         # 节点置信度融合了文献质量 Q
         conf = self.conn.execute(
             "SELECT confidence FROM ontology_nodes WHERE node_type='Method' "

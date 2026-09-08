@@ -171,6 +171,12 @@ RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才
 - published_in(发表于)
 - authored_by(作者为)
 - developed_by(由…开发)
+- correlates_with(与…相关/随…变化；仅用于监测/共现，非因果)
+- enables(使能/实现/支持某应用或功能)
+- complicates(并发/加重某并发症)
+- risk_factor_for(是…的风险因素)
+- results_in(导致…结果：过程/干预 → 组织/临床结果)
+- is_a(是…的一种：类型层级/上下位)
 
 同义归一规则：以下表述必须归一到左侧词表词，禁止使用多个变体制造“假新关系”：
 - employ / utilize / apply → uses
@@ -195,6 +201,12 @@ RELATION_VOCAB = """关系类型必须从以下列表选择（若确无匹配才
 - publish in / appear in → published_in
 - author by / written by → authored_by
 - develop / create / design → developed_by
+- correlate / correlate with / track → correlates_with
+- enable / allow / make possible → enables
+- complicate / complication of → complicates
+- risk factor for / predispose to → risk_factor_for
+- result in / resulting in → results_in
+- is a / is an / kind of / type of / subclass of → is_a
 
 注意：同义归一后，type 字段必须使用左侧规范词（如 uses、evaluates、promotes），不得使用右侧原词。
 predicate 字段可补充具体内容，但避免重复动词。

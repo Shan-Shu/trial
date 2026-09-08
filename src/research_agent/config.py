@@ -61,6 +61,7 @@ class Settings:
     max_extract_chars: int = 8000   # 单次 LLM 抽取的文本窗口大小
     max_extract_chunks: int = 4     # 一篇论文最多抽取的文本块数（控制成本）
     q_flag_penalty: float = 0.85    # “标记后发送”的文献，质量权重折扣
+    strong_edge_min_conf: float = 0.72  # 低于此阈值的强因果/调控边标记 candidate
 
     # ---------- 网络 ----------
     http_timeout: int = 30

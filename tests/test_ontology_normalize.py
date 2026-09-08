@@ -29,6 +29,41 @@ class OntologyNormalizeTest(unittest.TestCase):
         self.assertEqual(ont.canonical_relation_type("composed of"), "made_of")
         self.assertEqual(ont.canonical_relation_type("novel_link"), "novel_link")
 
+    def test_v005_relations_and_identity(self):
+        self.assertEqual(ont.canonical_relation_type("correlate"), "correlates_with")
+        self.assertEqual(ont.canonical_relation_type("enable"), "enables")
+        self.assertEqual(ont.canonical_relation_type("complicates"), "complicates")
+        self.assertEqual(ont.canonical_relation_type("risk factor for"),
+                         "risk_factor_for")
+        self.assertEqual(ont.canonical_relation_type("results in"), "results_in")
+        self.assertEqual(ont.canonical_relation_type("is a"), "is_a")
+        # 身份/证据列存在
+        cols = {r["name"] for r in self.conn.execute(
+            "PRAGMA table_info(ontology_nodes)")}
+        for c in ("identity_key", "external_source", "external_id",
+                  "term_status", "scope_tag", "evidence_tier"):
+            self.assertIn(c, cols)
+        ecols = {r["name"] for r in self.conn.execute(
+            "PRAGMA table_info(ontology_edges)")}
+        self.assertIn("evidence_tier", ecols)
+
+    def test_material_registry_and_event_side(self):
+        lid = ont.register_material(
+            self.conn, "GelMA", synonyms=["gelatin methacryloyl"],
+            composition={"base": "gelatin", "modification": "methacryloyl"})
+        self.assertTrue(lid.startswith("lcmat:"))
+        row = self.conn.execute(
+            "SELECT preferred_name, term_status FROM material_registry "
+            "WHERE local_id=?", (lid,)).fetchone()
+        self.assertEqual(row["preferred_name"], "GelMA")
+        self.assertEqual(row["term_status"], "local_uncurated")
+        eid = ont.add_event_assertion(
+            self.conn, paper_key="p1", event_type="Experiment",
+            trigger="mechanical test", participants=["GelMA"],
+            entity_refs=[1], confidence=0.8,
+            provenance=[{"paper": "p1", "evidence": "s1"}])
+        self.assertGreater(eid, 0)
+
     def test_edge_relation_normalized_in_db(self):
         n1 = ont.upsert_node(self.conn, node_type="Method", name="X", confidence=0.8)[0]
         n2 = ont.upsert_node(self.conn, node_type="Dataset", name="Y", confidence=0.8)[0]
