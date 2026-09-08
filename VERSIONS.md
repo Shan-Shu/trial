@@ -11,6 +11,8 @@ research-agent（LangGraph 多模型科研辅助 Agent）本地提交版本索�
 
 | v0.0.5 | a8d92f9125a832900e7b8b7884197b3a55d40328 | 事件旁路化(event_assertions)、实体双轨身份+材料登记(lcmat)、证据等级/scope、细粒度关系、强断言置信门控、合并/方向队列 |
 | v0.0.6 | cafb20c0a4e2ea877efa44725fdfa9d70aa81695 | 三开源学习报告(docs/open_source_agents_learning_report.md)、知识提取硬性禁区清单(ERROR_LIST)、低置信/泛化关系定向精修(extract_with_refine)、语料兜底关系提醒、skills 同步、精修开关/阈值(RA_KNOWLEDGE_REFINE 等) |
+| v0.0.6.1 | 7009c5033faf56c5a771ab6ad8f2b75a1460607a | 提速补丁：并行批量提取脚本(examples/run_knowledge_batch.py，多 worker/WAL/预建连接/逐篇进度)，知识节点 run_init 开关消除并发建表锁；pro 2 篇并行 268s≈串行一半 |
 
 > 注：v0.0.5 标签随后续“属性质量优化(模板字段/去空值/snake_case/value+unit/扫描器)”前移至最新提交，精确指针以 git tag 为准。
 > 注：v0.0.6 标签随本表登记提交前移，精确指针以 git tag 为准。
+> 注：v0.0.6.1 标签随本表登记提交前移，精确指针以 git tag 为准。
