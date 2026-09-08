@@ -10,3 +10,5 @@ research-agent（LangGraph 多模型科研辅助 Agent）本地提交版本索�
 | v0.0.4 | 69950303510cf3ccf139936c9678bb7fd7cfdf0a | 事件节点名词化 + involves 克制 + 四版本对比产物 |
 
 | v0.0.5 | a8d92f9125a832900e7b8b7884197b3a55d40328 | 事件旁路化(event_assertions)、实体双轨身份+材料登记(lcmat)、证据等级/scope、细粒度关系、强断言置信门控、合并/方向队列 |
+
+> 注：v0.0.5 标签随后续“属性质量优化(模板字段/去空值/snake_case/value+unit/扫描器)”前移至最新提交，精确指针以 git tag 为准。
