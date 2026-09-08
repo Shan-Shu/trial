@@ -8,12 +8,14 @@ from __future__ import annotations
 import argparse
 import logging
 import sqlite3
+from uuid import uuid4
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from research_agent.config import Settings
+from research_agent.db import connect, log_event
 from research_agent.models import build_role_model
 from research_agent.study.collection import collect_mission
 from research_agent.study.consumer import make_knowledge_consumer_node
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 class StudyState(TypedDict, total=False):
     request: str
+    run_id: str
     plan: dict
     knowledge: dict
     collection_report: dict
@@ -66,19 +69,24 @@ def _route_after_reviewer(state: StudyState) -> str:
 
 
 def build_study_graph(services: StudyServices | None = None,
-                      conn: sqlite3.Connection | None = None):
+                      conn: sqlite3.Connection | None = None,
+                      max_results_override: int | None = None):
     services = services or StudyServices()
     g = StateGraph(StudyState)
-    g.add_node("planner", make_planner_node(services.planner_model))
+    g.add_node("planner", make_planner_node(
+        services.planner_model, max_results_override=max_results_override,
+        conn=conn, settings=services.settings))
     g.add_node(
         "knowledge_consumer",
         make_knowledge_consumer_node(
             conn=conn, settings=services.settings, collector=services.collector),
     )
-    g.add_node("content_builder", make_content_node(services.content_model))
+    g.add_node("content_builder", make_content_node(
+        services.content_model, conn=conn, settings=services.settings))
     g.add_node(
         "reviewer",
-        make_review_node(services.review_model, max_rounds=3),
+        make_review_node(services.review_model, max_rounds=3,
+                         conn=conn, settings=services.settings),
     )
 
     g.add_edge(START, "planner")
@@ -105,14 +113,39 @@ def build_study_graph(services: StudyServices | None = None,
 def run_study(request: str,
               services: StudyServices | None = None,
               conn: sqlite3.Connection | None = None,
-              force_collect: bool = False) -> dict[str, Any]:
-    app = build_study_graph(services, conn)
-    return app.invoke({
+              force_collect: bool = False,
+              max_results_override: int | None = None) -> dict[str, Any]:
+    app = build_study_graph(services, conn,
+                            max_results_override=max_results_override)
+    run_id = uuid4().hex[:12]
+    own = conn is None
+    db = conn or connect((services or StudyServices()).settings.db_path)
+    try:
+        log_event(db, "study", "session-start", None,
+                  {"run_id": run_id, "request": request, "status": "running"})
+    finally:
+        if own:
+            db.close()
+    out = app.invoke({
         "request": request,
+        "run_id": run_id,
         "review_rounds": 0,
         "status": "started",
         "force_collect": force_collect,
     })
+    own = conn is None
+    db = conn or connect((services or StudyServices()).settings.db_path)
+    try:
+        log_event(db, "study", "session-end", None, {
+            "run_id": run_id,
+            "status": out.get("status"),
+            "decision": out.get("decision"),
+            "request": request,
+        })
+    finally:
+        if own:
+            db.close()
+    return out
 
 
 def _resolve_study_role(role: str, choice: str, smoke: bool) -> Any:
@@ -153,7 +186,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="四个顶层节点均不使用真实 LLM（确定性实现）")
     ap.add_argument("--collect", action="store_true",
                     help="知识不足时调用现有 retrieval->quality->knowledge 补集")
-    ap.add_argument("--source", choices=["pubmed", "arxiv", "both"], default="pubmed")
+    ap.add_argument("--max-results", type=int, default=None,
+                    help="覆盖规划节点的单主题结果上限（默认使用任务单）")
+    ap.add_argument(
+        "--source",
+        choices=["pubmed", "arxiv", "both", "europepmc",
+                 "semantic_scholar", "openalex", "fulltext", "all"],
+        default="fulltext")
     args = ap.parse_args(argv)
 
     settings = Settings.from_env()
@@ -187,7 +226,11 @@ def main(argv: list[str] | None = None) -> int:
         settings=settings,
         collector=collector,
     )
-    out = run_study(args.request, services, force_collect=args.collect)
+    out = run_study(
+        args.request, services,
+        force_collect=args.collect,
+        max_results_override=args.max_results,
+    )
     status = out.get("status")
     print(f"\n状态: {status} | 请求: {args.request}")
     plan = out.get("plan") or {}

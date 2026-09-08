@@ -271,9 +271,35 @@ def _paper_header(meta: dict[str, Any] | None) -> str:
     )
 
 
+def _domain_profile_hint(domain_profile: dict[str, Any] | None) -> str | None:
+    if not domain_profile:
+        return None
+    kind = str(domain_profile.get("domain_kind") or "").strip()
+    if kind in ("", "general"):
+        return None
+    label = domain_profile.get("label") or kind
+    status = str(domain_profile.get("schema_status") or "candidate")
+    lines = [
+        f"本任务领域画像：{kind}（{label}）",
+        f"schema_status：{status}",
+    ]
+    if status == "frozen":
+        lines.append("以下为本领域已冻结 schema，只允许使用其中的类型，不得新增：")
+    else:
+        lines.append("以下为本领域候选 schema，首次抽取可参考；确需新增时需说明理由：")
+    entities = [str(x) for x in domain_profile.get("candidate_entity_types") or []]
+    relations = [str(x) for x in domain_profile.get("candidate_relation_types") or []]
+    if entities:
+        lines.append("候选/冻结实体类型: " + ", ".join(entities))
+    if relations:
+        lines.append("候选/冻结关系类型: " + ", ".join(relations))
+    return "\n".join(lines)
+
+
 def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None,
                  existing_entities: list[str] | None = None,
-                 recent_generic_warning: str | None = None) -> str:
+                 recent_generic_warning: str | None = None,
+                 domain_profile: dict[str, Any] | None = None) -> str:
     header = _paper_header(paper_meta)
     text = "\n\n".join(paragraphs)
     parts = [SYSTEM_HINT, SCHEMA_HINT, ATTRIBUTE_HINT, RELATION_VOCAB,
@@ -287,6 +313,9 @@ def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None
         )
     if recent_generic_warning:
         parts.append(recent_generic_warning)
+    domain_hint = _domain_profile_hint(domain_profile)
+    if domain_hint:
+        parts.append(domain_hint)
     parts.append(f"----------------\n论文段落：\n{text}\n----------------\n输出 JSON:")
     return "\n\n".join(parts)
 
@@ -438,10 +467,11 @@ class KnowledgeExtractor:
     def extract(self, paragraphs: list[str],
                 paper_meta: dict[str, Any] | None = None,
                 existing_entities: list[str] | None = None,
-                recent_generic_warning: str | None = None) -> dict[str, Any]:
+                recent_generic_warning: str | None = None,
+                domain_profile: dict[str, Any] | None = None) -> dict[str, Any]:
         """单遍抽取（无精修），返回结构化 JSON。"""
         prompt = build_prompt(paragraphs, paper_meta, existing_entities,
-                              recent_generic_warning)
+                              recent_generic_warning, domain_profile)
         try:
             return self._run(prompt)
         except Exception as exc:  # noqa: BLE001
@@ -452,6 +482,7 @@ class KnowledgeExtractor:
                             paper_meta: dict[str, Any] | None = None,
                             existing_entities: list[str] | None = None,
                             recent_generic_warning: str | None = None,
+                            domain_profile: dict[str, Any] | None = None,
                             ) -> tuple[dict[str, Any], dict[str, Any]]:
         """首遍抽取 + 低置信/泛化关系定向精修（v0.0.6）。
 
@@ -463,7 +494,7 @@ class KnowledgeExtractor:
             "converged": False, "failed_attempts": 0,
         }
         base_prompt = build_prompt(paragraphs, paper_meta, existing_entities,
-                                   recent_generic_warning)
+                                   recent_generic_warning, domain_profile)
         try:
             first = self._run(base_prompt)
         except Exception as exc:  # noqa: BLE001

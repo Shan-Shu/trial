@@ -330,28 +330,41 @@ GLM 4.7 Flash 的模型 code 为 `glm-4.7-flash`（智谱开放平台免费）�
 新增离线测试（`tests/test_llm_roles.py`）验证：检索节点按 LLM 规划的多查询入库多篇、
 质量节点用假 GLM 子项评分覆盖规则结果（含 `[LLM 评审]` rationale 入库）。
 
-## 11. PubMed 文献源（当前默认，临时替代 arXiv）
+## 11. 多库检索与全文优先（默认 fulltext）
 
-PubMed 本身不提供 PDF，接入采用「NCBI + Europe PMC」双通道组合：
+检索统一经过 `ApiHub`，默认 `--source fulltext`，按“可提供全文/PDF”的优先级
+组合 Europe PMC、arXiv、Semantic Scholar、OpenAlex；需要时再回退 PubMed。
 
-1. **检索/元数据**：NCBI E-utilities `esearch + efetch`，解析 标题 / 全部作者 /
-   作者单位 / 期刊与 ISSN / 年份 / DOI / PMID / PMCID；
-2. **全文**：Europe PMC `fullTextXML` 拉取 OA(PMC) 全文 → 转纯文本；有 PMC 时
-   尽力尝试 `europepmc.org/articles/{PMCID}?pdf=render` 的 PDF（常被限流）；
-3. **回退**：无 OA 全文则用摘要作为提取文本，并在 `papers.fulltext_source`
-   记录 `pdf / xml / abstract`。
+当前来源：
+
+| 来源 | `--source` | 全文/PDF能力 |
+|---|---|---|
+| Europe PMC | `europepmc` | OA 全文 XML + OA PDF，优先 |
+| arXiv | `arxiv` | PDF 全文 |
+| Semantic Scholar | `semantic_scholar` | 检索 + Open Access PDF 定位 |
+| OpenAlex | `openalex` | OA PDF 定位 + 元数据 |
+| PubMed | `pubmed` | 元数据/摘要，PMCID 后回退 Europe PMC 全文 |
+| Europe PMC+arXiv+Semantic+OpenAlex | `fulltext` | 默认全文优先组合 |
+| 以上全部 | `all` | 覆盖最大，但非全文记录更多 |
 
 ```powershell
-# 用 PubMed 检索处理（--source 默认已是 pubmed）
-uv run research-agent-pipeline --query "bone regeneration AND scaffold" --max-results 20 --source pubmed
+# 默认 fulltext：全文源优先
+uv run research-agent-pipeline --query "bone regeneration AND scaffold" --max-results 20
 
-# 切回 arXiv 或两者同时
-uv run research-agent-pipeline --query "..." --source arxiv
+# 只检索某一种源，或退回到 PubMed
+uv run research-agent-pipeline --query "..." --source europepmc
+uv run research-agent-pipeline --query "..." --source semantic_scholar
+uv run research-agent-pipeline --query "..." --source pubmed
 uv run research-agent-pipeline --query "..." --source both
+uv run research-agent-pipeline --query "..." --source all
 ```
 
-备注：NCBI 无 Key 限速 ≤3 req/s，代码内置 `delay=0.35s`；如申请了 NCBI Key，
-设环境变量 `NCBI_API_KEY` 可提速。
+任一来源无 PDF 时，若记录带 PMCID 会自动尝试 Europe PMC OA XML，仍失败则回退
+摘要，并在 `papers.fulltext_source` 记录 `pdf / xml / abstract`。
+
+备注：Semantic Scholar 免费接口无 Key 时可能 429，可设
+`SEMANTIC_SCHOLAR_API_KEY` 提升额度；Unpaywall 补 OA PDF 时需设有效邮箱
+`UNPAYWALL_EMAIL`；NCBI 仍限速 ≤3 req/s，设 `NCBI_API_KEY` 可提速。
 
 ## 12. 四节点研究任务层（规划 / 知识消费 / 内容形成 / 审核校对）
 

@@ -123,12 +123,16 @@ const AGENT_TAG = {
   quality: "tag-quality",
   knowledge: "tag-knowledge",
   human_review: "tag-human_review",
+  study: "tag-study",
 };
 const EVENT_ZH = {
   "search-done": "检索完成", "paper-ingested": "文献入库", "paper-error": "入库失败",
   "enrich-done": "元数据回补完成", "assessed": "完成质量评估",
   "human-review": "转入人工审核", "extracted": "完成知识提取",
   "skipped-no-model": "跳过提取(无模型)",
+  "session-start": "研究流程开始", "session-end": "研究流程结束",
+  "planner": "工作规划", "knowledge_consumer": "知识消费",
+  "content_builder": "内容形成", "reviewer": "审核校对",
 };
 
 async function loadAgents() {
@@ -162,6 +166,101 @@ async function loadLogs() {
       <span class="ts">${fmtTs(l.ts)}</span>
     </li>`;
   }).join("") || '<li class="msg">暂无活动</li>';
+}
+
+/* ---------- 研究流程监控 ---------- */
+function flowStatusMeta(s) {
+  const map = {
+    pending: ["pending", "等待"],
+    running: ["running", "运行中"],
+    done: ["done", "已完成"],
+    needs_collection: ["needs_collection", "等待补集"],
+    error: ["error", "错误"],
+  };
+  const m = map[s] || map.pending;
+  return m;
+}
+
+async function loadStudyFlow() {
+  const data = await api("/api/study/status");
+  const banner = $("#studyBanner");
+  const overallCls = data.status === "running" ? "running" :
+    (data.status === "idle" ? "pending" : "done");
+  banner.innerHTML = `
+    <span class="big"><i class="${data.status === "running" ? "pulse" : ""}"></i>
+      ${esc(data.status === "running" ? "研究流程运行中" : data.status === "idle" ? "暂无运行记录" : "最近一次运行已完成")}
+    </span>
+    <span class="dim">请求：${esc(data.request || "-")}</span>
+    <span class="dim">Run ${esc(data.run_id || "-")}</span>
+    <span class="dim">开始 ${fmtFull(data.started_at)}</span>
+    <span class="dim">结束 ${fmtFull(data.ended_at)}</span>`;
+  const nodes = data.nodes || [];
+  const nodeLabels = {
+    planner: ["工作规划", "解析请求并生成任务单"],
+    knowledge_consumer: ["知识消费", "读取本体模式/证据，必要时请求补集"],
+    content_builder: ["内容形成", "依据证据卡生成可溯源草稿"],
+    reviewer: ["审核校对", "核查引用与证据支持度"],
+  };
+  $("#studyNodes").innerHTML = nodes.length ? nodes.map((n) => {
+    const [cls, txt] = flowStatusMeta(n.status);
+    let detail = "";
+    const d = n.details || {};
+    if (n.id === "planner") detail = d.goal || (d.seed_terms || []).join("; ") || "";
+    if (n.id === "knowledge_consumer") {
+      detail = (d.patterns != null ? `模式 ${d.patterns} · 证据 ${d.evidence} · 覆盖率 ${d.coverage_score ?? "-"}` : d.reason) || "";
+    }
+    if (n.id === "content_builder") detail = d.title || (d.sections != null ? `${d.sections} 节` : "");
+    if (n.id === "reviewer") detail = d.decision ? `决策 ${d.decision} · 问题 ${d.issues ?? 0}` : "";
+    return `<div class="flow-node ${esc(cls)}">
+      <div class="fn-name">${esc((nodeLabels[n.id] || [n.label])[0])}</div>
+      <div class="fn-status"><span>${esc(txt)}${n.status === "running" ? '<span class="pulse"></span>' : ""}</span><span>${fmtTs(n.last_ts)}</span></div>
+      <div class="fn-detail" title="${esc(detail)}">${esc(detail || n.desc || "")}</div>
+    </div>`;
+  }).join("") : '<div class="summary-card">尚无研究流程记录。运行 research-agent-study 后可在此查看。</div>';
+
+  const summary = data.summary || {};
+  const p = summary.plan || {};
+  const k = summary.knowledge || {};
+  const dr = summary.draft || {};
+  const rv = summary.review || {};
+  $("#studySummary").innerHTML = `
+    <dl>
+      <dt>目标</dt><dd>${esc(p.goal || "-")}</dd>
+      <dt>领域</dt><dd>${esc(p.domain || "-")}</dd>
+      <dt>任务类型</dt><dd>${esc(p.content_type || "-")}</dd>
+      <dt>检索词</dt><dd>${esc((p.seed_terms || []).join("; ") || "-")}</dd>
+      <dt>模式/证据</dt><dd>${k.patterns != null ? `${esc(k.patterns)} / ${esc(k.evidence)}` : "-"}</dd>
+      <dt>覆盖率</dt><dd>${esc(k.coverage_score ?? "-")}</dd>
+      <dt>内容标题</dt><dd>${esc(dr.title || "-")}</dd>
+      <dt>章节数</dt><dd>${dr.sections != null ? esc(dr.sections) : "-"}</dd>
+      <dt>审核决策</dt><dd>${esc(rv.decision || "-")} · 问题 ${esc(rv.issues ?? "-")}</dd>
+      <dt>审核说明</dt><dd>${esc(rv.summary || "-")}</dd>
+    </dl>`;
+
+  const agentData = await api("/api/agents");
+  $("#pipelineNodes").innerHTML = agentData.agents.map((a) => `
+    <div class="pipeline-node">
+      <span><b>${esc(a.label)}</b> · ${esc(a.desc)}</span>
+      <span class="dim">事件 ${a.count} · 文献 ${a.paper_count} · ${fmtTs(a.last_ts)}</span>
+    </div>`).join("") || '<p style="color:var(--muted)">暂无数据构建节点事件</p>';
+
+  $("#studyEvents").innerHTML = (data.events || []).slice(-40).map((e) => {
+    const det = e.details || {};
+    let detail = "";
+    if (e.event === "planner") detail = det.goal || "";
+    if (e.event === "knowledge_consumer") {
+      detail = det.patterns != null ? `patterns=${det.patterns}, evidence=${det.evidence}` : det.reason || "";
+    }
+    if (e.event === "content_builder") detail = det.title || "";
+    if (e.event === "reviewer") detail = `${det.decision || ""} issues=${det.issues ?? 0}`;
+    if (e.event === "session-start" || e.event === "session-end") detail = det.request || det.status || "";
+    return `<div class="study-event">
+      <span>${esc(EVENT_ZH[e.event] || e.event)}</span>
+      <span>${esc(det.status || "")}</span>
+      <span class="ev-detail" title="${esc(detail)}">${esc(detail)}</span>
+      <span>${fmtFull(e.ts)}</span>
+    </div>`;
+  }).join("") || '<p style="color:var(--muted)">暂无本轮事件</p>';
 }
 
 /* ---------- 本体图谱 ---------- */
@@ -444,6 +543,7 @@ function openDetail(title) {
 function switchTab(tab) {
   state.tab = tab;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  $("#view-workflow").classList.toggle("hidden", tab !== "workflow");
   $("#view-graph").classList.toggle("hidden", tab !== "graph");
   $("#view-papers").classList.toggle("hidden", tab !== "papers");
 }
@@ -452,9 +552,9 @@ function switchTab(tab) {
 async function refreshAll() {
   try {
     await loadOverview();
-    await Promise.all([loadAgents(), loadLogs()]);
+    await Promise.all([loadAgents(), loadLogs(), loadStudyFlow()]);
     if (state.tab === "papers") await loadPapers();
-    else await loadGraph(true);
+    else if (state.tab === "graph") await loadGraph(true);
   } catch (err) {
     toast("刷新失败: " + err.message);
   }
@@ -463,6 +563,7 @@ async function refreshAll() {
 /* ---------- 事件绑定 ---------- */
 function bind() {
   $("#refreshBtn").onclick = refreshAll;
+  $("#tabWorkflow").onclick = () => { switchTab("workflow"); loadStudyFlow(); };
   $("#tabGraph").onclick = () => { switchTab("graph"); loadGraph(true); };
   $("#tabPapers").onclick = () => { switchTab("papers"); loadPapers(); };
   $("#btnApplyGraph").onclick = () => { state.minConf = parseFloat($("#minConf").value); loadGraph(); };
@@ -486,6 +587,9 @@ function bind() {
 /* ---------- 启动 ---------- */
 async function init() {
   bind();
+  const initialTab = location.hash.replace("#", "");
+  if (initialTab === "workflow") switchTab("workflow");
+  else if (initialTab === "papers") switchTab("papers");
   try {
     const health = await api("/api/health");
     $("#dbLabel").textContent = "数据库: " + health.db;

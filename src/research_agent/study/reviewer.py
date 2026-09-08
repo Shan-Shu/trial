@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from research_agent.config import Settings, settings as default_settings
 from research_agent.study.content import render_draft
+from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
 
 logger = logging.getLogger(__name__)
@@ -188,13 +191,20 @@ def _compact_knowledge(knowledge: dict[str, Any],
     }
 
 
-def make_review_node(model=None, max_rounds: int = 3):
+def make_review_node(model=None, max_rounds: int = 3,
+                     conn: sqlite3.Connection | None = None,
+                     settings: Settings | None = None):
     """构造 LangGraph 审核校对节点。model 为 None 时使用确定性审核。"""
+    settings = settings or default_settings
+
     def review_node(state: dict) -> dict:
         plan = state.get("plan") or {}
         draft = state.get("draft") or {}
         knowledge = state.get("knowledge") or {}
+        run_id = state.get("run_id")
         rounds = int(state.get("review_rounds") or 0)
+        log_study_event(conn, settings, "reviewer", run_id, "running",
+                        {"round": rounds + 1})
         review = None
         if model is not None:
             prompt = REVIEW_PROMPT.replace(
@@ -228,6 +238,14 @@ def make_review_node(model=None, max_rounds: int = 3):
                 ),
             }
         status = "manual_review" if review["decision"] == "manual_review" else "reviewed"
+        log_study_event(
+            conn, settings, "reviewer", run_id, status,
+            {
+                "decision": review["decision"],
+                "issues": len(review.get("issues") or []),
+                "round": rounds + 1,
+                "summary": review.get("summary"),
+            })
         return {
             "review": review,
             "decision": review["decision"],

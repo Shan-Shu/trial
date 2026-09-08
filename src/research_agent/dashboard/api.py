@@ -281,6 +281,120 @@ def agent_status(db_path: Path | str | None = None,
         conn.close()
 
 
+def study_status(db_path: Path | str | None = None,
+                 recent: int = 300) -> dict[str, Any]:
+    """返回最近一次研究任务四节点的运行状态。"""
+    conn = _open(db_path)
+    try:
+        if not _table(conn, "processing_log"):
+            return {"run_id": None, "status": "idle", "request": None,
+                    "nodes": [], "events": [], "summary": {}}
+        rows = conn.execute(
+            "SELECT id, paper_key, node, event, details, ts "
+            "FROM processing_log WHERE node='study' "
+            "ORDER BY id DESC LIMIT ?", (recent,)
+        ).fetchall()
+        parsed = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["details"] = json.loads(d.get("details") or "null")
+            except json.JSONDecodeError:
+                d["details"] = None
+            parsed.append(d)
+        start = next((d for d in parsed if d["event"] == "session-start"), None)
+        if not start:
+            return {"run_id": None, "status": "idle", "request": None,
+                    "nodes": [], "events": [], "summary": {}}
+        start_id = int(start["id"])
+        run_events = [d for d in parsed if int(d["id"]) >= start_id]
+        run_events.reverse()
+        run_id = (start.get("details") or {}).get("run_id")
+
+        defs = [
+            ("planner", "工作规划节点",
+             "解析用户请求，生成语料采集任务单"),
+            ("knowledge_consumer", "知识消费节点",
+             "从动态本体读取模式/证据，或请求补集"),
+            ("content_builder", "内容形成节点",
+             "基于模式卡/证据卡生成可溯源草稿"),
+            ("reviewer", "审核校对节点",
+             "核查引用、冲突与覆盖缺口"),
+        ]
+        nodes = []
+        for event_name, label, desc in defs:
+            evs = [d for d in run_events if d["event"] == event_name]
+            status = "pending"
+            last = evs[-1] if evs else None
+            if last:
+                det = last.get("details") or {}
+                status = det.get("status", "done")
+                if status in ("running",):
+                    status = "running"
+                elif status == "error":
+                    status = "error"
+                elif status == "needs_collection":
+                    status = "needs_collection"
+                elif status in ("reviewed", "manual_review", "done"):
+                    status = "done"
+            nodes.append({
+                "id": event_name,
+                "label": label,
+                "desc": desc,
+                "status": status,
+                "last_ts": last["ts"] if last else None,
+                "count": len(evs),
+                "details": (last.get("details") or {}) if last else {},
+            })
+        end = next((d for d in run_events if d["event"] == "session-end"), None)
+        overall = "running"
+        if end:
+            det = end.get("details") or {}
+            overall = "completed" if det.get("status") != "error" else "error"
+        summary = {}
+        for ev in run_events:
+            det = ev.get("details") or {}
+            if ev["event"] == "planner" and det.get("status") == "done":
+                summary["plan"] = {
+                    "goal": det.get("goal"),
+                    "domain": det.get("domain"),
+                    "content_type": det.get("content_type"),
+                    "seed_terms": det.get("seed_terms"),
+                }
+            elif ev["event"] == "knowledge_consumer":
+                summary["knowledge"] = {
+                    "patterns": det.get("patterns"),
+                    "evidence": det.get("evidence"),
+                    "coverage_score": det.get("coverage_score"),
+                    "papers": det.get("papers"),
+                }
+            elif ev["event"] == "content_builder" and det.get("status") == "done":
+                summary["draft"] = {
+                    "title": det.get("title"),
+                    "sections": det.get("sections"),
+                    "markdown_chars": det.get("markdown_chars"),
+                }
+            elif ev["event"] == "reviewer":
+                summary["review"] = {
+                    "decision": det.get("decision"),
+                    "issues": det.get("issues"),
+                    "round": det.get("round"),
+                    "summary": det.get("summary"),
+                }
+        return {
+            "run_id": run_id,
+            "status": overall,
+            "request": (start.get("details") or {}).get("request"),
+            "started_at": start["ts"],
+            "ended_at": end["ts"] if end else None,
+            "nodes": nodes,
+            "events": run_events[-80:],
+            "summary": summary,
+        }
+    finally:
+        conn.close()
+
+
 def activity_log(limit: int = 80, db_path: Path | str | None = None) -> list[dict[str, Any]]:
     conn = _open(db_path)
     try:
@@ -329,6 +443,9 @@ def ontology_graph(db_path: Path | str | None = None, *,
             params.extend([like, like])
         rows = conn.execute(sql, params).fetchall()
         total = len(rows)
+        truncated = total > limit
+        if truncated:
+            rows = rows[:limit]
         node_ids: set[int] = set()
         nodes = []
         for r in rows:
@@ -360,9 +477,6 @@ def ontology_graph(db_path: Path | str | None = None, *,
                         "type": e["relation_type"],
                         "confidence": round(float(e["confidence"] or 0), 3),
                     })
-        truncated = len(nodes) > limit
-        if truncated:
-            nodes = nodes[:limit]
         return {"nodes": nodes, "edges": edges,
                 "truncated": truncated, "total": total,
                 "shown_nodes": len(nodes), "shown_edges": len(edges)}

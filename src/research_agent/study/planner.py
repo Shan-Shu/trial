@@ -9,11 +9,15 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 from datetime import date
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from research_agent.config import Settings, settings as default_settings
+from research_agent.domains import normalize_domain_profile
+from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
 
 logger = logging.getLogger(__name__)
@@ -24,9 +28,15 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
 硬性要求：
 1. 不要生成内容大纲，不要预设章节，不要预判研究结论；
 2. 重点是把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
-3. seed_terms 应是互不相同的检索词，覆盖领域核心词、方法/材料词、评价指标与应用词；
+3. seed_terms 必须是英文检索词，覆盖领域核心词、方法/催化剂/机理、评价与应用词；
+   禁止把用户整句话直接作为 seed_terms 或 domain；
 4. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
 5. 只输出 JSON 对象，不要代码块，不要解释。
+
+示例（只参考字段风格，不要照抄用户原话作为 domain/seed_terms）：
+用户原话：尝试提出一种炔酰胺构建多元氮杂化合物的新方法
+合理 seed_terms 示例：["ynamide annulation", "ynamide nitrogen heterocycle synthesis",
+"alkynyl amide cyclization", "ynamide catalytic cycloaddition"]
 
 当前日期：{today}
 
@@ -38,6 +48,13 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
   "goal": "一句话目标",
   "domain": "研究领域",
   "content_type": "research_report|frontier_review|research_directions|experiment_protocol",
+  "domain_profile": {{
+    "domain_kind": "chemistry|biomedicine|materials|general",
+    "dimensions": ["该领域应覆盖的检索/分析维度"],
+    "candidate_entity_types": ["首轮可试用的实体类型"],
+    "candidate_relation_types": ["首轮可试用的关系类型"],
+    "schema_status": "candidate"
+  }},
   "analysis_targets": ["方法", "材料", "性能指标", "应用", "开放问题"],
   "mission": {{
     "seed_terms": ["英文检索词1", "英文检索词2", "英文检索词3"],
@@ -54,11 +71,17 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
   "constraints": []
 }}
 
-请直接输出可解析的 JSON："""
+请直接输出可解析的 JSON：
+
+注意：domain_profile.dimensions 必须针对领域真实需要，例如化学领域写
+“催化、底物范围、区域/立体选择性、机理、产率”，不要写“适应症/临床转化”等无关维度。"""
 
 
 def infer_content_type(request: str) -> str:
     text = request.lower()
+    if any(k in text for k in ("提出", "propose", "new method", "新方法",
+                               "合成方法", "strategy", "策略")):
+        return "research_directions"
     if any(k in text for k in ("实验", "protocol", "design", "设计")):
         return "experiment_protocol"
     if any(k in text for k in ("方向", "idea", "gap", "候选")):
@@ -95,6 +118,8 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
         "goal": goal,
         "domain": domain,
         "content_type": content_type,
+        "domain_profile": normalize_domain_profile(
+            raw.get("domain_profile"), domain, request),
         "analysis_targets": analysis,
         "mission": mission,
         "deliverable": {
@@ -111,10 +136,18 @@ def deterministic_plan(request: str) -> dict[str, Any]:
     return normalize_plan(None, request)
 
 
-def make_planner_node(model=None):
+def make_planner_node(model=None,
+                      max_results_override: int | None = None,
+                      conn: sqlite3.Connection | None = None,
+                      settings: Settings | None = None):
     """构造 LangGraph 工作规划节点。model 为 None 时使用确定性任务单。"""
+    settings = settings or default_settings
+
     def planner_node(state: dict) -> dict:
         request = clean_str(state.get("request"), "请检索并整理研究前沿")
+        run_id = state.get("run_id")
+        log_study_event(conn, settings, "planner", run_id, "running",
+                        {"request": request[:500]})
         plan = None
         model_error = None
         if model is not None:
@@ -133,6 +166,17 @@ def make_planner_node(model=None):
             plan = deterministic_plan(request)
         if model_error:
             plan["model_error"] = model_error
+        if max_results_override is not None:
+            plan["mission"]["max_results"] = max(1, int(max_results_override))
+        log_study_event(
+            conn, settings, "planner", run_id, "done",
+            {
+                "goal": plan.get("goal"),
+                "domain": plan.get("domain"),
+                "content_type": plan.get("content_type"),
+                "seed_terms": plan.get("mission", {}).get("seed_terms"),
+                "max_results": plan.get("mission", {}).get("max_results"),
+            })
         return {"plan": plan, "status": "planned"}
 
     return planner_node

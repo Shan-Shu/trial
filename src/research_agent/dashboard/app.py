@@ -27,7 +27,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     app = FastAPI(
         title="research-agent 看板",
         description="动态本体图谱 + 智能体工作状态 + 输入输出",
-        version="0.1.0",
+        version="0.1.1",
     )
     app.state.db_path = _db
 
@@ -51,6 +51,10 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     def agents(recent: int = Query(40, ge=1, le=200)) -> dict:
         agents_list, events = dbapi.agent_status(_db, recent=recent)
         return {"agents": agents_list, "recent": events}
+
+    @app.get("/api/study/status")
+    def study_status() -> dict:
+        return dbapi.study_status(_db)
 
     @app.get("/api/logs")
     def logs(limit: int = Query(80, ge=1, le=500)) -> list[dict]:

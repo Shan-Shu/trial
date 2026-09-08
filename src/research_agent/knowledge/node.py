@@ -314,7 +314,8 @@ def make_knowledge_node(model=None,
             }
             for chunk in chunks:
                 data, refine_stats = extractor.extract_with_refine(
-                    chunk, meta, existing_entities, generic_warning)
+                    chunk, meta, existing_entities, generic_warning,
+                    state.get("domain_profile"))
                 chunk_stats = _upsert_knowledge(
                     db, data, quality_q=quality_q, flagged=flagged,
                     paper_key=key, settings=settings, evidence_tier=tier,

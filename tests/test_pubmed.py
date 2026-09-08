@@ -95,6 +95,11 @@ class _Passthrough:
         return None
 
 
+class _NoUnpaywall:
+    def lookup_by_doi(self, doi):
+        return None
+
+
 class ApiHubSourceTest(unittest.TestCase):
     def test_both_sources_dedupe_by_doi(self):
         pubmed_rec = {
@@ -110,6 +115,7 @@ class ApiHubSourceTest(unittest.TestCase):
         hub = ApiHub(arxiv=_FakeSearcher([arxiv_rec]),
                      openalex=_Passthrough(), crossref=_Passthrough(),
                      pubmed=_FakeSearcher([pubmed_rec]),
+                     unpaywall=_NoUnpaywall(),
                      source="both")
         out = hub.search("test", max_results=5)
         self.assertEqual(len(out), 1)

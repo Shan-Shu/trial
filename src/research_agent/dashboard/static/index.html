@@ -39,9 +39,27 @@
     <!-- 右侧：图谱 / 文献 -->
     <main class="main">
       <nav class="tabs">
+        <button class="tab" data-tab="workflow" id="tabWorkflow">研究流程</button>
         <button class="tab active" data-tab="graph" id="tabGraph">本体图谱</button>
         <button class="tab" data-tab="papers" id="tabPapers">文献列表</button>
       </nav>
+
+      <section id="view-workflow" class="view hidden">
+        <div id="studyBanner" class="study-banner"></div>
+        <div class="flow-grid" id="studyNodes"></div>
+        <div class="flow-cols">
+          <div>
+            <h3 class="section-title">本轮运行摘要</h3>
+            <div id="studySummary" class="summary-card"></div>
+          </div>
+          <div>
+            <h3 class="section-title">数据构建节点</h3>
+            <div id="pipelineNodes" class="pipeline-list"></div>
+          </div>
+        </div>
+        <h3 class="section-title mt">本轮事件</h3>
+        <div id="studyEvents" class="study-events"></div>
+      </section>
 
       <section id="view-graph" class="view">
         <div class="graph-toolbar">

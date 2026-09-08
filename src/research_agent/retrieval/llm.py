@@ -36,31 +36,23 @@ def _parse_first_json(text: str) -> Any | None:
     return None
 
 
-PLAN_PROMPT_TEMPLATE = """你是科研文献检索规划器。用户会给出一个简短的研究主题（可能只有几个词，如“新型骨修复生物材料”）。你需要基于该主题，生成一组英文检索式，每个检索式聚焦一个不同的研究子领域或维度，以便系统逐个执行检索（轮询），全面获取相关文献。
+PLAN_PROMPT_TEMPLATE = """你是科研文献检索规划器。用户/规划节点会给出一个简短研究主题。
+工作规划节点已经提供分析维度，请围绕这些维度生成英文检索式，让系统逐个执行检索，
+全面获取该领域相关文献，而不是套用任何固定的生物医药或材料模板。
 
-你需要考虑以下子领域维度（根据主题自动选择相关项，尽可能覆盖更多，但每条检索式只聚焦1-2个维度，避免混合过多概念导致结果不相关）：
-- 核心关键词：主题本身、同义词、近义词、上下位概念。
-- 方法与技术：涉及的主要方法、技术、模型、工具、工艺。
-- 应用与场景：主要应用领域、适应症、使用场景、目标对象。
-- 机理与原理：作用机制、原理、理论、结构-功能关系。
-- 性能与特性：活性、稳定性、生物相容性、力学性能、耐久性等（根据主题调整性能指标）。
-- 变种与拓展：不同材料类型、改进型、衍生技术、复合体系。
-- 优化与调控：性能优化、配方调整、工艺改进、参数优化。
-- 产业化与转化：生产工艺、规模化、成本、临床转化、商业化、审评审批。
-- 评价与标准：安全性评价、质量控制、标准、测试方法。
+分析维度：
+{dimensions_block}
 
 要求：
-1. 生成 4-6 条英文检索式（如果主题较窄，至少3条；如果主题宽泛，可适当增加，但不超过6条）。
-2. 每条检索式必须明确对应上述一个或两个紧密相关的子领域，用核心主题词与子领域术语组合，例如：
-   - 主题词 AND 子领域关键词
-   - 主题词 AND (子领域关键词1 OR 关键词2)
-3. 整体上，这些检索式应覆盖核心关键词、方法、应用，并至少触及其他两个子领域（如性能、机理、产业化等），确保检索的全面性。
-4. 每条检索式应为完整的英文查询字符串，可使用布尔运算符（AND、OR、NOT）、双引号短语、通配符（*）等常规检索语法。
-5. 避免不同检索式之间关键词大量重复，每个子领域的检索应相对独立。
-6. 只输出 JSON 数组字符串，数组元素为字符串，例如：["bone repair biomaterials AND bioactivity", "osteogenic scaffolds AND mechanical properties", "biodegradable bone graft AND clinical translation", "bone regeneration AND osteoinductive mechanism"]。
-7. 不要输出任何解释、注释或额外文本，确保输出可直接被 JSON 解析。
-8. 目标文献库为 PubMed：AND/OR/NOT、双引号短语、通配符* 与字段限定 [Title/Abstract] 均受支持；
-   如需突出近期进展可在检索式中加 [dp] 年份过滤。当前日期：{date}。
+1. 生成 3-6 条英文检索式；窄主题至少 3 条。
+2. 每条检索式对应一个或两个紧密相关的分析维度，不要混入无关维度。
+3. 若未提供分析维度，请只依据主题自行拆解不同角度，禁止套用固定领域维度表。
+4. 每条检索式应为完整英文查询，可用 AND/OR/NOT、双引号与通配符。
+5. 避免不同检索式大量重复关键词。
+6. 只输出 JSON 数组字符串，不输出解释、注释或代码块。
+7. 检索会投递到 PubMed / Europe PMC / OpenAlex / Semantic Scholar / arXiv；
+   避免 site:/[Title/Abstract]/[dp] 等单一平台操作符。
+8. 当前日期：{date}。
 
 主题：{topic}"""
 
@@ -105,10 +97,19 @@ class RetrievalLLM:
         self.max_queries = max_queries
 
     # ---- 1) 查询规划 ----
-    def plan_queries(self, topic: str) -> list[str]:
-        """基于研究主题生成一组覆盖多子领域的英文检索式（4-6 条）。"""
+    def plan_queries(self, topic: str,
+                     dimensions: list[str] | None = None) -> list[str]:
+        """基于研究主题与工作规划节点给出的领域维度生成检索式。"""
+        if dimensions:
+            dimensions_block = "\n".join(f"- {d}" for d in dimensions)
+        else:
+            dimensions_block = (
+                "（未提供固定领域维度。请只依据主题生成检索式，"
+                "不要套用任何固定的领域模板。）"
+            )
         prompt = PLAN_PROMPT_TEMPLATE.replace("{topic}", topic).replace(
-            "{date}", date.today().isoformat())
+            "{date}", date.today().isoformat()).replace(
+                "{dimensions_block}", dimensions_block)
         try:
             msg = self.model.invoke([HumanMessage(content=prompt)])
             raw = getattr(msg, "content", str(msg))

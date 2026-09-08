@@ -33,6 +33,7 @@ def ingest_search_results(
     model=None,
     conn: sqlite3.Connection | None = None,
     settings: Settings | None = None,
+    dimensions: list[str] | None = None,
 ) -> dict[str, Any]:
     """LLM(DeepSeek V4) 规划检索式 → 逐篇下载 PDF → 清洗 → 入库。
 
@@ -46,7 +47,7 @@ def ingest_search_results(
     ingested: list[str] = []
     errors: list[dict] = []
     try:
-        queries = retriever.plan_queries(query) if retriever else [query]
+        queries = retriever.plan_queries(query, dimensions) if retriever else [query]
         records: list[dict] = []
         seen: set[str] = set()
         per_query = max(1, max_results // max(1, len(queries)))
@@ -88,9 +89,9 @@ def ingest_search_results(
                 rec["clean_text_sha256"] = (
                     _sha256(clean["text"].encode("utf-8")) if clean and clean["text"] else None
                 )
-                # PubMed 源：无 PDF 时依次回退 OA 全文(Europe PMC) / 摘要
+                # 任意源：有 PMCID 时回退 Europe PMC OA XML，再回退摘要
                 if not rec.get("clean_text"):
-                    if rec.get("source") == "pubmed" and rec.get("pmcid") \
+                    if rec.get("pmcid") \
                             and callable(getattr(api, "fulltext_text", None)):
                         ft = api.fulltext_text(rec["pmcid"])
                         if ft:

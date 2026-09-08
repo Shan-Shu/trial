@@ -90,6 +90,12 @@ class DashboardApiTest(unittest.TestCase):
         self.assertGreaterEqual(agents["quality"]["count"], 1)
         self.assertGreaterEqual(agents["knowledge"]["count"], 1)
 
+    def test_study_status_idle(self):
+        data = self.client.get("/api/study/status").json()
+        self.assertEqual(data["status"], "idle")
+        self.assertIn("nodes", data)
+        self.assertIn("summary", data)
+
     def test_logs(self):
         logs = self.client.get("/api/logs?limit=10").json()
         self.assertEqual(len(logs), 3)

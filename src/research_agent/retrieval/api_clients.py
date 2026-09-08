@@ -12,6 +12,11 @@ from urllib.parse import quote
 import requests
 
 from research_agent.config import settings
+from research_agent.retrieval.extended import (
+    EuropePmcClient,
+    SemanticScholarSearcher,
+    UnpaywallClient,
+)
 from research_agent.retrieval.pubmed import PubMedClient
 
 logger = logging.getLogger(__name__)
@@ -148,6 +153,69 @@ class OpenAlexClient:
                       "primary_location,authorships,open_access,concepts",
         })
         return (data or {}).get("results") or []
+
+    def search_publications(self, query: str, per_page: int = 5,
+                            open_access_only: bool = True) -> list[dict]:
+        """OpenAlex 检索源：返回规范化记录，并优先返回 OA PDF 位置。"""
+        params = {
+            "search": query,
+            "per-page": per_page,
+            "select": ",".join([
+                "id", "doi", "title", "publication_year", "publication_date",
+                "cited_by_count", "primary_location", "best_oa_location",
+                "authorships", "open_access", "ids", "abstract_inverted_index",
+            ]),
+        }
+        if open_access_only:
+            params["filter"] = "open_access.is_oa:true"
+        data = _safe_get(f"{self.BASE}/works", params=params)
+        return [self._normalize_publication(r)
+                for r in (data or {}).get("results") or []]
+
+    @staticmethod
+    def _abstract_text(index: dict | None) -> str:
+        items: list[tuple[int, str]] = []
+        for word, positions in (index or {}).items():
+            for pos in positions or []:
+                items.append((int(pos), word))
+        return " ".join(w for _, w in sorted(items))
+
+    @classmethod
+    def _normalize_publication(cls, work: dict) -> dict:
+        best = work.get("best_oa_location") or {}
+        primary = work.get("primary_location") or {}
+        loc = best or primary
+        source = loc.get("source") or {}
+        pdf_url = best.get("pdf_url") or primary.get("pdf_url")
+        ids = work.get("ids") or {}
+        authors = []
+        for a in (work.get("authorships") or []):
+            auth = a.get("author") or {}
+            insts = [(i or {}).get("display_name")
+                     for i in (a.get("institutions") or [])]
+            authors.append({
+                "name": auth.get("display_name"),
+                "orcid": auth.get("orcid"),
+                "affiliations": [x for x in insts if x],
+            })
+        wid = work.get("id") or ""
+        return {
+            "paper_key": f"openalex:{wid.rstrip('/').split('/')[-1]}" if wid else None,
+            "source": "openalex",
+            "title": (work.get("title") or "").strip(),
+            "abstract": cls._abstract_text(work.get("abstract_inverted_index")),
+            "doi": work.get("doi"),
+            "venue": source.get("display_name"),
+            "source_type": source.get("type"),
+            "pub_year": work.get("publication_year"),
+            "pub_date": work.get("publication_date"),
+            "publication_status": "Published" if work.get("publication_date") else None,
+            "citation_count": work.get("cited_by_count"),
+            "authors": authors,
+            "is_open_access": bool((work.get("open_access") or {}).get("is_oa")),
+            "pdf_url": pdf_url,
+            "pmcid": ids.get("pmcid"),
+        }
 
     def author_h_indices(self, author_ids: list[str], limit: int = 5) -> dict[str, float]:
         """按 OpenAlex author id 批量取 H 指数（最多 limit 位作者）。"""
@@ -290,32 +358,62 @@ class CrossrefClient:
         }
 
 
-class ApiHub:
-    """统一入口：多源检索（PubMed/arXiv）→ 逐条补全。
+SOURCE_SETS = {
+    "pubmed": ["pubmed"],
+    "arxiv": ["arxiv"],
+    "both": ["pubmed", "arxiv"],
+    "europepmc": ["europepmc"],
+    "semantic_scholar": ["semantic_scholar"],
+    "openalex": ["openalex"],
+    "fulltext": ["europepmc", "arxiv", "semantic_scholar", "openalex"],
+    "all": ["europepmc", "pubmed", "arxiv", "semantic_scholar", "openalex"],
+}
 
-    source: 'pubmed' | 'arxiv' | 'both'，默认由调用方（pipeline --source）指定。
+
+class ApiHub:
+    """统一入口：多源检索（全文源优先）→ 逐条补全。
+
+    source 支持 pubmed/arxiv/both/europepmc/semantic_scholar/openalex/
+    fulltext/all；fulltext 为默认，按可提供全文/PDF 的程度排序。
     """
 
     def __init__(self, arxiv: ArxivSearcher | None = None,
                  openalex: OpenAlexClient | None = None,
                  crossref: CrossrefClient | None = None,
                  pubmed: PubMedClient | None = None,
-                 source: str = "arxiv") -> None:
+                 europepmc: EuropePmcClient | None = None,
+                 semantic_scholar: SemanticScholarSearcher | None = None,
+                 unpaywall: UnpaywallClient | None = None,
+                 source: str = "fulltext") -> None:
         self.arxiv = arxiv or ArxivSearcher()
         self.openalex = openalex or OpenAlexClient()
         self.crossref = crossref or CrossrefClient()
         self.pubmed = pubmed or PubMedClient()
+        self.europepmc = europepmc or EuropePmcClient()
+        self.semantic_scholar = semantic_scholar or SemanticScholarSearcher()
+        self.unpaywall = unpaywall or UnpaywallClient()
         self.source = source
 
     def search(self, query: str, max_results: int = 5,
                source: str | None = None) -> list[dict]:
         """按 source 检索并补全元数据，返回规范记录列表。跨源按 key/DOI 去重。"""
         source = (source or self.source).lower()
+        source_set = SOURCE_SETS.get(source)
+        if source_set is None:
+            source_set = SOURCE_SETS["fulltext"]
         raw: list[dict] = []
-        if source in ("pubmed", "both"):
-            raw += self.pubmed.search(query, max_results=max_results)
-        if source in ("arxiv", "both"):
-            raw += self.arxiv.search(query, max_results=max_results)
+        for name in source_set:
+            if name == "pubmed":
+                raw += self.pubmed.search(query, max_results=max_results)
+            elif name == "arxiv":
+                raw += self.arxiv.search(query, max_results=max_results)
+            elif name == "europepmc":
+                raw += self.europepmc.search(query, max_results=max_results)
+            elif name == "semantic_scholar":
+                raw += self.semantic_scholar.search(query, max_results=max_results)
+            elif name == "openalex":
+                raw += self.openalex.search_publications(
+                    query, per_page=max_results, open_access_only=True)
         uniq: list[dict] = []
         seen_keys: set[str] = set()
         seen_dois: set[str] = set()
@@ -340,7 +438,7 @@ class ApiHub:
         return enriched
 
     def enrich(self, rec: dict[str, Any]) -> dict[str, Any]:
-        """尽力补全：OpenAlex 优先，Crossref 兜底。"""
+        """尽力补全：OpenAlex/Crossref 元数据，Unpaywall 补 OA PDF。"""
         rec = self.openalex.enrich(rec)
         if not (rec.get("doi") and rec.get("venue") and rec.get("authors")):
             extra = None
@@ -350,6 +448,11 @@ class ApiHub:
                 extra = self.crossref.lookup_by_title(rec["title"])
             if extra:
                 rec = merge_metadata(rec, extra)
+        if rec.get("doi") and not rec.get("pdf_url"):
+            oa = self.unpaywall.lookup_by_doi(rec["doi"])
+            if oa and oa.get("pdf_url"):
+                rec["pdf_url"] = oa["pdf_url"]
+                rec["is_open_access"] = bool(oa.get("is_oa"))
         return rec
 
     def download_pdf(self, rec: dict[str, Any]) -> bytes | None:
@@ -357,7 +460,7 @@ class ApiHub:
         candidates = []
         if rec.get("pdf_url"):
             candidates.append(rec["pdf_url"])
-        if rec.get("source") == "pubmed" and rec.get("pmcid"):
+        if rec.get("pmcid"):
             candidates.append(
                 f"https://europepmc.org/articles/{rec['pmcid']}?pdf=render")
         key = rec.get("paper_key") or ""
@@ -372,5 +475,5 @@ class ApiHub:
         return None
 
     def fulltext_text(self, pmcid: str) -> str | None:
-        """Europe PMC OA 全文文本（PubMed 源无 PDF 时的回退）。"""
+        """Europe PMC OA 全文文本（任意来源有 PMCID 时的 XML 回退）。"""
         return self.pubmed.fetch_fulltext_text(pmcid)

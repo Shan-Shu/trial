@@ -25,11 +25,15 @@ def collect_mission(request: dict[str, Any],
         return {"count": 0, "errors": ["seed_terms 为空"]}
     max_results = max(1, int(request.get("max_results") or 80))
     per = per_topic or max(1, min(10, max_results // len(terms)))
+    domain_profile = request.get("domain_profile") or None
+    dimensions = (domain_profile or {}).get("dimensions") or None
     collected: list[str] = []
     errors: list[dict[str, Any]] = []
     for term in terms[:max_topics]:
         try:
-            out = run_topic(term, max_results=per, services=services)
+            out = run_topic(term, max_results=per, services=services,
+                            dimensions=dimensions,
+                            domain_profile=domain_profile)
             keys = (out.get("ingest") or {}).get("paper_keys") or []
             collected.extend(keys)
             logger.info("collect topic=%s papers=%d", term, len(keys))

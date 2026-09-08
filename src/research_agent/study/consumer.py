@@ -15,7 +15,9 @@ from typing import Any, Callable
 
 from research_agent.config import Settings, settings as default_settings
 from research_agent.db import connect
+from research_agent.domains import normalize_domain_profile
 from research_agent.ontology import store as ont
+from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str
 
 logger = logging.getLogger(__name__)
@@ -166,6 +168,9 @@ def build_retrieval_request(plan: dict[str, Any] | None) -> dict[str, Any]:
         "seed_terms": terms,
         "max_results": int(mission.get("max_results") or 80),
         "min_confidence": float(mission.get("min_confidence") or 0.6),
+        "domain_profile": normalize_domain_profile(
+            plan.get("domain_profile"), plan.get("domain"),
+            plan.get("goal") or ""),
         "suggested_route": "retrieval -> quality -> knowledge",
     }
 
@@ -183,9 +188,13 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
     def knowledge_consumer_node(state: dict) -> dict:
         plan = state.get("plan") or {}
         mission = plan.get("mission") or {}
+        run_id = state.get("run_id")
         own_conn = conn is None
         db = conn or connect(settings.db_path)
         try:
+            log_study_event(
+                conn, settings, "knowledge_consumer", run_id, "running",
+                {"domain": plan.get("domain")})
             bundle = mine_ontology_evidence(db, mission)
             collection_report = state.get("collection_report") or {}
             force_collect = bool(state.get("force_collect"))
@@ -197,6 +206,11 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
                     logger.warning("补充语料失败: %s", exc)
                     collection_report["error"] = str(exc)
             if not bundle["patterns"]:
+                log_study_event(
+                    conn, settings, "knowledge_consumer", run_id,
+                    "needs_collection",
+                    {"patterns": 0, "evidence": 0,
+                     "reason": (build_retrieval_request(plan) or {}).get("reason")})
                 return {
                     "knowledge": bundle,
                     "collection_report": collection_report,
@@ -204,6 +218,15 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
                     "force_collect": False,
                     "status": "needs_collection",
                 }
+            log_study_event(
+                conn, settings, "knowledge_consumer", run_id, "done",
+                {
+                    "patterns": len(bundle.get("patterns") or []),
+                    "evidence": len(bundle.get("evidence") or []),
+                    "coverage_score": bundle.get("coverage_score"),
+                    "papers": (bundle.get("corpus") or {}).get("papers"),
+                    "collected": (collection_report or {}).get("count"),
+                })
             return {
                 "knowledge": bundle,
                 "collection_report": collection_report,

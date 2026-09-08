@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from research_agent.config import Settings, settings as default_settings
+from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
 
 logger = logging.getLogger(__name__)
@@ -177,11 +180,17 @@ def _compact_knowledge(knowledge: dict[str, Any],
     }
 
 
-def make_content_node(model=None):
+def make_content_node(model=None,
+                      conn: sqlite3.Connection | None = None,
+                      settings: Settings | None = None):
     """构造 LangGraph 内容形成节点。model 为 None 时做确定性转写。"""
+    settings = settings or default_settings
+
     def content_node(state: dict) -> dict:
         plan = state.get("plan") or {}
         knowledge = state.get("knowledge") or {}
+        run_id = state.get("run_id")
+        log_study_event(conn, settings, "content_builder", run_id, "running")
         draft = None
         model_error = None
         if model is not None:
@@ -204,6 +213,13 @@ def make_content_node(model=None):
             draft = deterministic_draft(plan, knowledge)
         if model_error:
             draft["model_error"] = model_error
+        log_study_event(
+            conn, settings, "content_builder", run_id, "done",
+            {
+                "title": draft.get("title"),
+                "sections": len(draft.get("sections") or []),
+                "markdown_chars": len(draft.get("markdown") or ""),
+            })
         return {"draft": draft, "status": "drafted"}
 
     return content_node

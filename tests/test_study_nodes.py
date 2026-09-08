@@ -83,6 +83,10 @@ class StudyNodesTest(unittest.TestCase):
         draft = out["draft"]
         self.assertIn("P-0001", draft["markdown"])
         self.assertIn("E-0001-1", draft["markdown"])
+        study_events = self.conn.execute(
+            "SELECT COUNT(*) FROM processing_log WHERE node='study'"
+        ).fetchone()[0]
+        self.assertGreaterEqual(study_events, 8)
 
     def test_planner_llm_and_consumer_contracts(self):
         request = "写一份 2024-2026 年 RAG 前沿综述"

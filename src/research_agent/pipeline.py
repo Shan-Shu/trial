@@ -54,6 +54,7 @@ class PipelineState(TypedDict, total=False):
     extraction_report: dict
     status: str
     error: str
+    domain_profile: dict
 
 
 @dataclass
@@ -110,7 +111,8 @@ def build_pipeline_graph(services: Services | None = None,
 
 def process_papers(keys: list[str], services: Services | None = None,
                    conn: sqlite3.Connection | None = None,
-                   max_meta_attempts: int | None = None) -> list[dict]:
+                   max_meta_attempts: int | None = None,
+                   domain_profile: dict | None = None) -> list[dict]:
     """对多篇文献逐篇运行 质量→知识 全流程（供主题批量与监控回调使用）。"""
     services = services or Services()
     graph = build_pipeline_graph(services, conn)
@@ -118,13 +120,17 @@ def process_papers(keys: list[str], services: Services | None = None,
     for key in keys:
         state: PipelineState = {"current_key": key, "mode": "load",
                                 "meta_attempts": 0}
+        if domain_profile:
+            state["domain_profile"] = domain_profile
         out = graph.invoke(state)
         results.append(out)
     return results
 
 
 def run_topic(query: str, max_results: int = 3, services: Services | None = None,
-              conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+              conn: sqlite3.Connection | None = None,
+              dimensions: list[str] | None = None,
+              domain_profile: dict | None = None) -> dict[str, Any]:
     """完整流程：检索批量入库 → 逐篇 质量评估+知识提取。返回检索报告与逐篇结果。"""
     services = services or Services()
     s = services.settings
@@ -133,9 +139,11 @@ def run_topic(query: str, max_results: int = 3, services: Services | None = None
     try:
         ingest = ingest_search_results(
             query, max_results, api=services.api,
-            model=services.retriever_model, conn=db, settings=s)
+            model=services.retriever_model, conn=db, settings=s,
+            dimensions=dimensions)
         keys = ingest["paper_keys"]
-        per_paper = process_papers(keys, services, db) if keys else []
+        per_paper = process_papers(keys, services, db,
+                                   domain_profile=domain_profile) if keys else []
         return {"ingest": ingest, "per_paper": per_paper}
     finally:
         if own:
@@ -162,8 +170,12 @@ def main(argv: list[str] | None = None) -> int:
         {"openai", "deepseek", "qwen", "glm", "anthropic", "google"})
     ap.add_argument("--query", help="检索主题/关键词")
     ap.add_argument("--max-results", type=int, default=3)
-    ap.add_argument("--source", choices=["pubmed", "arxiv", "both"], default="pubmed",
-                    help="文献来源（当前默认 PubMed，可切回 arXiv 或同时检索）")
+    ap.add_argument(
+        "--source",
+        choices=["pubmed", "arxiv", "both", "europepmc",
+                 "semantic_scholar", "openalex", "fulltext", "all"],
+        default="fulltext",
+        help="文献来源；fulltext=Europe PMC/arXiv/Semantic Scholar/OpenAlex 全文优先")
     ap.add_argument("--db", help="SQLite 数据库路径（默认 data/research_agent.db）")
     ap.add_argument("--retriever-llm", choices=choices, default="auto",
                     help="文献检索节点 LLM（默认 auto → DeepSeek V4）")
