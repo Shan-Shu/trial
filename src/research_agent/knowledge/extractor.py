@@ -328,7 +328,12 @@ def parse_model_json(raw: str) -> dict[str, Any]:
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end <= start:
         raise ValueError("模型输出中未找到 JSON 对象")
-    data = json.loads(text[start:end + 1])
+    fragment = text[start:end + 1]
+    try:
+        data = json.loads(fragment)
+    except json.JSONDecodeError:
+        # 某些中文长文本会带回车等控制字符，宽松模式仍可解析。
+        data = json.loads(fragment, strict=False)
     if not isinstance(data, dict):
         raise ValueError("JSON 根节点不是对象")
     data.setdefault("entities", [])

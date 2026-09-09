@@ -59,7 +59,7 @@ D:\Desktop\trial
 │   │   ├── pdf_cleaner.py    # 行级页眉/页脚/页码剔除 → 精校重排文本
 │   │   ├── node.py           # 检索节点（search / enrich 回补 / load 三模式）
 │   │   └── monitor.py        # 实时监控数据库新文献的轮询接口
-│   ├── quality\          # 质量评估节点
+│   ├── quality\          # 质量控制节点（评估 + 领域词典归并）
 │   │   ├── scoring.py        # A/T/Q 公式 + 元数据完整性判定
 │   │   └── node.py           # 质量节点 + 人工审核节点
 │   ├── knowledge\        # 知识提取节点
@@ -168,7 +168,7 @@ uv run python examples\research_tools.py "graph neural network"
 
 ## 8. 三节点科研文献流水线（基于动态本体）
 
-`research-agent-pipeline`：**文献检索 → 质量评估 → 知识提取** 的 LangGraph 状态机，
+`research-agent-pipeline`：**文献检索 → 质量控制 → 知识提取** 的 LangGraph 状态机，
 产出物写入本地 SQLite（`data\research_agent.db`），供动态本体检索/推理使用。
 
 ```
@@ -184,11 +184,12 @@ START ──> retrieval ──> quality ──┬─(knowledge / flagged)──>
 - 预留**实时监控接口**：`retrieval/monitor.py` 的 `PaperMonitor` 按水位线轮询新文献，
   可对接定时任务/消息回调（`python -m research_agent.pipeline --monitor`）。
 
-### 8.2 质量评估节点（quality）
+### 8.2 质量控制节点（quality）
 - 权威性 `A = 0.5*期刊/出版社分级(JCR/SCI分区) + 0.3*作者H指数 + 0.2*被引次数`；
 - 时效性 `T = 0.7*exp(-ln2*age/学科半衰期) + 0.3*(1-age/25)`（学科半衰期：fast 2 / medium 4 / slow 8 年）；
 - `Q = 0.6*A + 0.4*T`（A、T、Q ∈ [0,1]）；
 - 路由：Q ≥ 0.8 直接送知识提取；0.5 ≤ Q < 0.8 标记后送知识提取；Q < 0.5 人工审核；
+- 全局控制：本体新增节点每满 300 个，按 IUPAC Gold Book / ChEBI 做一次领域词典归并；
 - 元数据缺漏 → 发回检索节点回补（≤ 3 轮），仍无法补全 → 人工审核。
 
 ### 8.3 知识提取节点（knowledge）
@@ -202,7 +203,7 @@ START ──> retrieval ──> quality ──┬─(knowledge / flagged)──>
 ### 8.4 使用
 
 ```powershell
-# 真实模式（联网检索 + 下载 PDF + 质量评估 + LLM 知识提取）
+# 真实模式（联网检索 + 下载 PDF + 质量控制 + LLM 知识提取）
 uv run research-agent-pipeline --query "retrieval augmented generation" --max-results 5 --model openai
 
 # 无 Key 冒烟（知识提取用静态 JSON 假模型，验证整条链路）
@@ -234,7 +235,7 @@ $env:PYTHONPATH = "$PWD\src"
 
 - **动态本体图谱**：节点/关系可视化（颜色按类型、大小按置信度），支持按类型勾选、
   最低置信度过滤、名称搜索；点击节点查看 属性/别名/来源证据/相邻关系；
-- **智能体工作状态**：文献检索 / 质量评估 / 知识提取 / 人工审核 四个工作台卡片，
+- **智能体工作状态**：文献检索 / 质量控制 / 知识提取 / 人工审核 四个工作台卡片，
   展示事件数、处理的文献数与最近事件；
 - **输入输出**：文献列表（含 Q 值/决策/提取计数）→ 点击查看详情：
   元数据与作者单位（输入）、A/T/Q 构成、精校正文、处理日志（输出）；
@@ -290,16 +291,16 @@ uv run research-agent-viz --dataset demo --open
 | 节点 | 默认模型 | provider / 接口 | 所需 API Key |
 |---|---|---|---|
 | 文献检索（retriever） | `deepseek-v4-pro`（DeepSeek V4，可换 `deepseek-v4-flash`） | deepseek | `DEEPSEEK_API_KEY` |
-| 质量评估（quality） | `glm-4.7-flash`（GLM 4.7 Flash） | glm（智谱 BigModel） | `ZHIPU_API_KEY` |
+| 质量控制（quality） | `deepseek-v4-flash` | deepseek | `DEEPSEEK_API_KEY` |
 | 知识提取（knowledge） | `deepseek-v4-pro`（DeepSeek V4 Pro，临时替代 gpt-5.6） | deepseek | `DEEPSEEK_API_KEY` |
 
 ### 各节点如何“用 LLM 实现”
 - **检索节点**：DeepSeek V4 负责「动脑」——把主题拆解为互补检索式（`plan_queries`）、
   规整多源原始元数据补齐作者/单位/DOI（`clean_metadata`）；arXiv/OpenAlex/Crossref
   仍负责实际的检索与下载（LLM 无法联网抓取）。
-- **质量节点**：GLM 4.7 Flash 依据文献元数据给出 期刊分区/venue/h/被引 等子项评分与
+- **质量控制节点**：DeepSeek V4 Flash 依据文献元数据给出 期刊分区/venue/h/被引 等子项评分与
   学科速度判断；`A/T/Q` 仍按既定公式 `Q=0.6A+0.4T` 计算与路由，保证规则可复现，
-  并把 GLM 的评审意见写入 `rationale`。
+  并把评审意见写入 `rationale`；节点还会在本体新增节点达到阈值时做领域词典全局归并。
 - **知识节点**：DeepSeek V4 Pro（临时替代 ChatGPT 5.6，因当前网络无法访问
   `api.openai.com`）负责把精校正文抽取为 实体/关系/属性/事件 的结构化 JSON，
   置信度按 `0.6*模型自评+0.4*质量权重` 融合后写入动态本体。
@@ -344,6 +345,7 @@ GLM 4.7 Flash 的模型 code 为 `glm-4.7-flash`（智谱开放平台免费）�
 | Semantic Scholar | `semantic_scholar` | 检索 + Open Access PDF 定位 |
 | OpenAlex | `openalex` | OA PDF 定位 + 元数据 |
 | PubMed | `pubmed` | 元数据/摘要，PMCID 后回退 Europe PMC 全文 |
+| NCPSSD（国家哲社文献中心） | `ncpssd` | 中文人文社科元数据/摘要，无 Key 开放检索 |
 | Europe PMC+arXiv+Semantic+OpenAlex | `fulltext` | 默认全文优先组合 |
 | 以上全部 | `all` | 覆盖最大，但非全文记录更多 |
 
@@ -355,6 +357,7 @@ uv run research-agent-pipeline --query "bone regeneration AND scaffold" --max-re
 uv run research-agent-pipeline --query "..." --source europepmc
 uv run research-agent-pipeline --query "..." --source semantic_scholar
 uv run research-agent-pipeline --query "..." --source pubmed
+uv run research-agent-pipeline --query "..." --source ncpssd
 uv run research-agent-pipeline --query "..." --source both
 uv run research-agent-pipeline --query "..." --source all
 ```
@@ -365,6 +368,11 @@ uv run research-agent-pipeline --query "..." --source all
 备注：Semantic Scholar 免费接口无 Key 时可能 429，可设
 `SEMANTIC_SCHOLAR_API_KEY` 提升额度；Unpaywall 补 OA PDF 时需设有效邮箱
 `UNPAYWALL_EMAIL`；NCBI 仍限速 ≤3 req/s，设 `NCBI_API_KEY` 可提速。
+
+NCPSSD 无独立 API Key，检索接口返回结构化元数据与摘要；历史记录里的
+`www.nssd.org` PDF 下载域名已停用，因此该源目前以摘要入库并记录
+`fulltext_source=abstract`。NCPSSD 期刊通常缺少 DOI/作者机构，质量节点对
+该源放宽为“作者+期刊出版信息”完整即可进入知识提取。
 
 ## 12. 四节点研究任务层（规划 / 知识消费 / 内容形成 / 审核校对）
 

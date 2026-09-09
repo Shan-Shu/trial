@@ -45,8 +45,11 @@ function toast(msg) {
   t._timer = setTimeout(() => t.classList.add("hidden"), 5000);
 }
 
-async function api(path) {
-  const resp = await fetch(path);
+async function api(path, options = {}) {
+  const resp = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
   if (!resp.ok) throw new Error(`HTTP ${resp.status} ${path}`);
   return resp.json();
 }
@@ -124,11 +127,16 @@ const AGENT_TAG = {
   knowledge: "tag-knowledge",
   human_review: "tag-human_review",
   study: "tag-study",
+  planner: "tag-study",
+  knowledge_consumer: "tag-study",
+  content_builder: "tag-study",
+  reviewer: "tag-study",
 };
 const EVENT_ZH = {
   "search-done": "检索完成", "paper-ingested": "文献入库", "paper-error": "入库失败",
-  "enrich-done": "元数据回补完成", "assessed": "完成质量评估",
+  "enrich-done": "元数据回补完成", "assessed": "完成质量控制",
   "human-review": "转入人工审核", "extracted": "完成知识提取",
+  "review-submitted": "提交人工审核结果",
   "skipped-no-model": "跳过提取(无模型)",
   "session-start": "研究流程开始", "session-end": "研究流程结束",
   "planner": "工作规划", "knowledge_consumer": "知识消费",
@@ -136,24 +144,42 @@ const EVENT_ZH = {
 };
 
 async function loadAgents() {
-  const data = await api("/api/agents");
-  $("#agentBoard").innerHTML = data.agents.map((a) => {
-    const evs = (a.events || []).slice(0, 6);
-    const rows = evs.map((e) => `
-      <div class="mini">
-        <span class="ev">${esc(EVENT_ZH[e.event] || e.event)} · ${esc(e.paper_key || "")}</span>
-        <span>${fmtTs(e.ts)}</span>
-      </div>`).join("") || '<div class="mini"><span class="ev">暂无事件</span></div>';
-    return `
-    <div class="agent" data-agent="${esc(a.id)}">
-      <div class="agent-head">
-        <span class="name">${esc(a.label)}</span>
-        <span class="meta">事件 ${a.count} · 文献 ${a.paper_count} · ${fmtTs(a.last_ts)}</span>
-      </div>
-      <div class="agent-desc">${esc(a.desc)}</div>
-      <div class="agent-events">${rows}</div>
-    </div>`;
-  }).join("");
+  const data = await api("/api/status/nodes");
+  const nodes = data.nodes || [];
+  const statusText = {
+    idle: ["pending", "等待/无事件"],
+    running: ["running", "运行中"],
+    done: ["done", "已完成"],
+    waiting: ["needs_collection", "等待人工"],
+    needs_collection: ["needs_collection", "等待补集"],
+    error: ["error", "错误"],
+  };
+  const groups = {};
+  nodes.forEach((a) => {
+    (groups[a.group] = groups[a.group] || []).push(a);
+  });
+  $("#agentBoard").innerHTML = Object.entries(groups).map(([groupName, items]) => `
+    <h2>${esc(groupName)}节点状态</h2>
+    ${items.map((a) => {
+      const [cls, txt] = statusText[a.status] || statusText.idle;
+      const evs = (a.events || []).slice(0, 4);
+      const rows = evs.map((e) => `
+        <div class="mini">
+          <span class="ev">${esc(EVENT_ZH[e.event] || e.event)} · ${esc(e.paper_key || "")}</span>
+          <span>${fmtTs(e.ts)}</span>
+        </div>`).join("") || '<div class="mini"><span class="ev">暂无事件</span></div>';
+      return `
+      <div class="agent ${esc(cls)}" data-agent="${esc(a.id)}">
+        <div class="agent-head">
+          <span class="name">${esc(a.label)}</span>
+          <span class="status-pill ${esc(cls)}">${esc(txt)}</span>
+        </div>
+        <div class="agent-meta">事件 ${a.count} · 文献 ${a.paper_count} · ${fmtTs(a.last_ts)}</div>
+        <div class="agent-desc">${esc(a.desc)}</div>
+        <div class="agent-events">${rows}</div>
+      </div>`;
+    }).join("")}
+  `).join("") || '<p style="color:var(--muted)">暂无节点事件</p>';
 }
 
 async function loadLogs() {
@@ -166,6 +192,42 @@ async function loadLogs() {
       <span class="ts">${fmtTs(l.ts)}</span>
     </li>`;
   }).join("") || '<li class="msg">暂无活动</li>';
+}
+
+async function loadEvents() {
+  try {
+    const node = $("#eventNodeFilter").value;
+    const search = $("#eventSearch").value.trim();
+    const params = new URLSearchParams({ limit: "500" });
+    if (node) params.set("node", node);
+    if (search) params.set("search", search);
+    const logs = await api("/api/logs?" + params.toString());
+    $("#eventCount").textContent = `共 ${logs.length} 条`;
+    $("#eventList").innerHTML = logs.map((l) => {
+      let detail = "";
+      try {
+        detail = JSON.stringify(l.details || "", null, 1);
+      } catch (err) { detail = String(l.details || ""); }
+      return `
+      <div class="event-row" data-eid="${esc(l.id ?? "")}">
+        <div class="ev-head">
+          <span class="tag ${AGENT_TAG[l.node] || "tag-study"}">${esc(EVENT_ZH[l.event] || l.event)}</span>
+          <span><b>${esc(l.node)}</b> / ${esc(l.event)}</span>
+          <span class="paper-key">${esc(l.paper_key || "-")}</span>
+          <span>${fmtFull(l.ts)}</span>
+        </div>
+        <pre class="event-detail hidden">${esc(detail)}</pre>
+      </div>`;
+    }).join("") || '<div class="summary-card">没有符合条件的日志</div>';
+    [...document.querySelectorAll(".event-row .ev-head")].forEach((head) => {
+      head.onclick = () => {
+        const pre = head.parentElement.querySelector(".event-detail");
+        pre.classList.toggle("hidden");
+      };
+    });
+  } catch (err) {
+    toast("加载事件日志失败: " + err.message);
+  }
 }
 
 /* ---------- 研究流程监控 ---------- */
@@ -418,6 +480,116 @@ async function loadPapers() {
   }
 }
 
+async function loadReviews() {
+  try {
+    const showHistory = $("#reviewHistoryToggle").checked;
+    const data = await api("/api/reviews?history=" + showHistory);
+    $("#reviewCount").textContent = showHistory
+      ? `历史 ${data.history.length} 条`
+      : `待处理 ${data.pending.length} 条`;
+    const presets = data.presets || {};
+    if (showHistory) {
+      $("#reviewList").innerHTML = `
+      <div class="table-wrap">
+        <table><thead><tr>
+          <th>时间</th><th>论文 key</th><th>标题</th><th>动作</th>
+          <th>决策</th><th>审核意见</th>
+        </tr></thead><tbody>
+        ${(data.history || []).map((h) => `
+          <tr>
+            <td>${fmtTs(h.reviewed_at)}</td>
+            <td>${esc(h.paper_key || "")}</td>
+            <td class="paper-title" title="${esc(h.title || "")}">${esc(h.title || "")}</td>
+            <td>${esc((presets[h.action] || {}).label || h.action || "")}</td>
+            <td>${esc(h.decision || "")}</td>
+            <td>${esc(h.rationale || "")}</td>
+          </tr>`).join("") || '<tr><td colspan="6" class="muted">暂无审核历史</td></tr>'}
+        </tbody></table>
+      </div>`;
+      return;
+    }
+    const pending = data.pending || [];
+    $("#reviewList").innerHTML = pending.map((p, idx) => {
+      const name = `review_action_${idx}`;
+      const presetEntries = Object.entries(presets);
+      return `
+      <div class="review-card" data-key="${esc(p.paper_key)}">
+        <div class="review-head">
+          <div>
+            <h4>${esc(p.title || p.paper_key)}</h4>
+            <div class="review-meta">${esc(p.paper_key)} · ${esc(p.source || "")} · ${esc(p.venue || "")} · ${esc(p.pub_year ?? "")}</div>
+          </div>
+          <span class="badge b-human">人工审核</span>
+        </div>
+        <div class="review-quality">
+          ${p.quality != null ? `Q ${p.quality} · A ${p.authority} · T ${p.timeliness}` : "尚无质量评分"} · 原决策 ${esc(p.decision || "-")}
+        </div>
+        ${p.rationale ? `<div class="review-reason"><b>质量节点说明：</b>${esc(p.rationale)}</div>` : ""}
+        <div class="review-preview"><b>正文/摘要预览：</b><br><pre class="event-detail">${esc(p.clean_preview || "（无文本）")}</pre></div>
+        <div class="review-actions">
+          ${presetEntries.map(([val, meta], i) => `
+            <label class="review-choice">
+              <input type="radio" name="${name}" value="${esc(val)}" ${i === 0 ? "checked" : ""}>
+              ${esc(meta.label)}
+            </label>`).join("")}
+          <label class="review-choice">
+            <input type="radio" name="${name}" value="custom">
+            自定义结果
+          </label>
+        </div>
+        <div class="review-custom-fields">
+          <select class="custom-decision" title="自定义决策">
+            <option value="knowledge">通过并进入知识提取</option>
+            <option value="flagged">标记后进入知识提取</option>
+            <option value="enrich">退回元数据补全</option>
+            <option value="rejected">拒绝</option>
+            <option value="human">保持人工审核</option>
+          </select>
+          <input class="custom-result" placeholder="自定义审核结果 JSON 或文本（可选）">
+        </div>
+        <textarea class="review-rationale" rows="2" placeholder="审核意见 / 说明，可留空"></textarea>
+        <div class="review-submit-row">
+          <button class="btn small review-submit">提交审核结果</button>
+        </div>
+      </div>`;
+    }).join("") || '<div class="summary-card">当前没有待人工审核文献。</div>';
+
+    [...document.querySelectorAll(".review-card")].forEach((card) => {
+      card.querySelector(".review-submit").onclick = async () => {
+        const key = card.dataset.key;
+        const action = card.querySelector('input[type="radio"]:checked').value;
+        const rationale = card.querySelector(".review-rationale").value.trim();
+        const customText = card.querySelector(".custom-result").value.trim();
+        const payload = {
+          paper_key: key,
+          action,
+          rationale,
+        };
+        if (action === "custom") {
+          payload.decision = card.querySelector(".custom-decision").value;
+        }
+        if (customText) {
+          try { payload.custom_result = JSON.parse(customText); }
+          catch (err) { payload.custom_result = customText; }
+        }
+        try {
+          const res = await api("/api/reviews/submit", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error(res.error || "提交失败");
+          toast(`已提交: ${res.paper_key} → ${res.decision}`);
+          await loadReviews();
+        } catch (err) {
+          toast("提交审核失败: " + err.message);
+        }
+      };
+    });
+  } catch (err) {
+    toast("加载人工审核失败: " + err.message);
+  }
+}
+
 /* ---------- 文献详情 ---------- */
 async function showPaper(key) {
   try {
@@ -430,7 +602,7 @@ async function showPaper(key) {
     body.innerHTML = `
       <div class="dtabs">
         <button class="dtab active" data-t="meta">概览</button>
-        <button class="dtab" data-t="quality">质量评估</button>
+        <button class="dtab" data-t="quality">质量控制</button>
         <button class="dtab" data-t="text">精校正文</button>
         <button class="dtab" data-t="logs">处理日志</button>
         <button class="dtab" data-t="run">本体提取</button>
@@ -488,7 +660,7 @@ async function showPaper(key) {
           </div>
         </div>`;
     } else {
-      qPane.innerHTML = '<p style="color:var(--muted)">尚未进行质量评估</p>';
+      qPane.innerHTML = '<p style="color:var(--muted)">尚未进行质量控制</p>';
     }
 
     body.querySelector('[data-pane="text"]').innerHTML =
@@ -546,6 +718,9 @@ function switchTab(tab) {
   $("#view-workflow").classList.toggle("hidden", tab !== "workflow");
   $("#view-graph").classList.toggle("hidden", tab !== "graph");
   $("#view-papers").classList.toggle("hidden", tab !== "papers");
+  $("#view-reviews").classList.toggle("hidden", tab !== "reviews");
+  $("#view-events").classList.toggle("hidden", tab !== "events");
+  $("#view-planner").classList.toggle("hidden", tab !== "planner");
 }
 
 /* ---------- 刷新 ---------- */
@@ -555,8 +730,91 @@ async function refreshAll() {
     await Promise.all([loadAgents(), loadLogs(), loadStudyFlow()]);
     if (state.tab === "papers") await loadPapers();
     else if (state.tab === "graph") await loadGraph(true);
+    else if (state.tab === "reviews") await loadReviews();
+    else if (state.tab === "events") await loadEvents();
   } catch (err) {
     toast("刷新失败: " + err.message);
+  }
+}
+
+async function loadDatabaseList() {
+  const list = await api("/api/databases");
+  const health = await api("/api/health");
+  const select = $("#dbSelect");
+  if (!list.some((d) => d.path === health.db)) {
+    list.unshift({
+      path: health.db,
+      name: PathName(health.db),
+      papers: 0, nodes: 0, edges: 0, logs: 0,
+    });
+  }
+  select.innerHTML = list.map((d) => `
+    <option value="${esc(d.path)}" ${d.path === health.db ? "selected" : ""}>
+      ${esc(d.name)} · P${d.papers}/N${d.nodes}/E${d.edges}
+    </option>`).join("");
+  select.onchange = async () => {
+    try {
+      await api("/api/db/select", {
+        method: "POST",
+        body: JSON.stringify({ path: select.value }),
+      });
+      $("#dbLabel").textContent = "数据库: " + select.value;
+      await refreshAll();
+      if (state.tab === "workflow") await loadStudyFlow();
+      if (state.tab === "events") await loadEvents();
+      toast("已切换到数据库: " + PathName(select.value));
+    } catch (err) {
+      toast("切换数据库失败: " + err.message);
+    }
+  };
+}
+
+function PathName(p) {
+  const parts = String(p || "").split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+async function sendToPlanner(executeStudy) {
+  const requestText = $("#plannerRequest").value.trim();
+  if (!requestText) { toast("请先输入规划指令"); return; }
+  const btn = executeStudy ? $("#btnPlannerStudy") : $("#btnPlannerPlan");
+  const original = btn.textContent;
+  btn.disabled = true;
+  try {
+    const endpoint = executeStudy ? "/api/study/run" : "/api/planner/run";
+    const res = await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ request: requestText }),
+    });
+    const panel = $("#plannerResult");
+    panel.classList.remove("hidden");
+    if (!res.ok) {
+      panel.innerHTML = `<div class="box error-box">${esc(res.error || "执行失败")}</div>`;
+      return;
+    }
+    if (executeStudy) {
+      panel.innerHTML = `<div class="box success-box">研究任务已后台提交，Job ${esc(res.job_id)}。切换到“研究流程”页查看状态。</div>`;
+      await loadStudyFlow();
+    } else {
+      const p = res.plan || {};
+      panel.innerHTML = `<div class="box">
+        <h4>规划结果</h4>
+        <dl class="kv">
+          <dt>目标</dt><dd>${esc(p.goal || "")}</dd>
+          <dt>领域</dt><dd>${esc(p.domain || "")}</dd>
+          <dt>任务类型</dt><dd>${esc(p.content_type || "")} / ${esc(p.task_kind || "")}</dd>
+          <dt>检索策略</dt><dd>${esc((p.retrieval || {}).strategy || "broad")} · 证据缺口 ${esc((p.retrieval || {}).evidence_gap_enabled ? "是" : "否")} · 单领域深挖 ${esc((p.retrieval || {}).deep_single_domain_enabled ? "是" : "否")}</dd>
+          <dt>检索词</dt><dd>${esc(((p.mission || {}).seed_terms || []).join("; ") || "-")}</dd>
+          <dt>最大结果</dt><dd>${esc((p.mission || {}).max_results ?? "-")}</dd>
+        </dl>
+        <pre class="event-detail">${esc(JSON.stringify(p, null, 2))}</pre>
+      </div>`;
+    }
+  } catch (err) {
+    toast("规划指令执行失败: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
   }
 }
 
@@ -566,6 +824,21 @@ function bind() {
   $("#tabWorkflow").onclick = () => { switchTab("workflow"); loadStudyFlow(); };
   $("#tabGraph").onclick = () => { switchTab("graph"); loadGraph(true); };
   $("#tabPapers").onclick = () => { switchTab("papers"); loadPapers(); };
+  $("#tabReviews").onclick = () => { switchTab("reviews"); loadReviews(); };
+  $("#tabEvents").onclick = () => { switchTab("events"); loadEvents(); };
+  $("#tabPlanner").onclick = () => { switchTab("planner"); };
+  $("#btnEventFilter").onclick = loadEvents;
+  $("#btnEventReset").onclick = () => {
+    $("#eventNodeFilter").value = "";
+    $("#eventSearch").value = "";
+    loadEvents();
+  };
+  $("#eventSearch").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadEvents();
+  });
+  $("#reviewHistoryToggle").onchange = loadReviews;
+  $("#btnPlannerPlan").onclick = () => sendToPlanner(false);
+  $("#btnPlannerStudy").onclick = () => sendToPlanner(true);
   $("#btnApplyGraph").onclick = () => { state.minConf = parseFloat($("#minConf").value); loadGraph(); };
   $("#btnResetGraph").onclick = () => {
     state.selectedTypes.clear();
@@ -590,9 +863,13 @@ async function init() {
   const initialTab = location.hash.replace("#", "");
   if (initialTab === "workflow") switchTab("workflow");
   else if (initialTab === "papers") switchTab("papers");
+  else if (initialTab === "reviews") switchTab("reviews");
+  else if (initialTab === "events") switchTab("events");
+  else if (initialTab === "planner") switchTab("planner");
   try {
     const health = await api("/api/health");
     $("#dbLabel").textContent = "数据库: " + health.db;
+    await loadDatabaseList();
     await refreshAll();
   } catch (err) {
     toast("无法连接后端: " + err.message);

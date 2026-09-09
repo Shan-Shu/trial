@@ -114,6 +114,58 @@ class DashboardApiTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("research-agent", r.text)
 
+    def test_status_nodes_and_filtered_logs(self):
+        data = self.client.get("/api/status/nodes").json()
+        ids = {n["id"] for n in data["nodes"]}
+        self.assertIn("retrieval", ids)
+        self.assertIn("quality", ids)
+        self.assertIn("knowledge", ids)
+        self.assertIn("planner", ids)
+        logs = self.client.get("/api/logs?node=quality").json()
+        self.assertEqual(len(logs), 1)
+
+    def test_planner_interaction(self):
+        r = self.client.post(
+            "/api/planner/run",
+            json={"request": "提出一个新的数据分析框架"},
+        )
+        self.assertEqual(r.status_code, 200)
+        payload = r.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["plan"]["goal"], "提出一个新的数据分析框架")
+        logs = self.client.get("/api/logs?node=study&event=planner").json()
+        self.assertGreaterEqual(len(logs), 1)
+
+    def test_database_switch_endpoint(self):
+        r = self.client.post("/api/db/select", json={"path": str(self.db)})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+        health = self.client.get("/api/health").json()
+        self.assertEqual(health["db"], str(self.db))
+
+    def test_human_review_pending_and_submit(self):
+        conn = connect(self.db)
+        conn.execute(
+            "UPDATE papers SET status='human_review' "
+            "WHERE paper_key='arxiv:9999.00001'")
+        conn.execute(
+            "UPDATE quality_results SET decision='human', needs_review=1 "
+            "WHERE paper_key='arxiv:9999.00001'")
+        conn.commit()
+        conn.close()
+        pending = self.client.get("/api/reviews").json()["pending"]
+        self.assertEqual(len(pending), 1)
+        r = self.client.post("/api/reviews/submit", json={
+            "paper_key": "arxiv:9999.00001",
+            "action": "reject",
+            "rationale": "数据与方法不适用于目标领域",
+            "custom_result": {"owner": "reviewer-a"},
+        })
+        self.assertTrue(r.json()["ok"])
+        history = self.client.get("/api/reviews?history=true").json()["history"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["decision"], "rejected")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

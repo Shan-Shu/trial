@@ -13,6 +13,10 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from research_agent.config import Settings, settings as default_settings
+from research_agent.retrieval.skills import (
+    normalize_edge_gaps,
+    select_low_support_gaps,
+)
 from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
 
@@ -57,6 +61,20 @@ knowledge:
           "status": "supported|hypothesis|open_question"
         }}
       ]
+    }}
+  ],
+  "edge_gaps": [
+    {{
+      "pattern_id": "P-xxxx",
+      "source_type": "源实体类型",
+      "source_name": "源实体",
+      "relation_type": "promotes",
+      "target_type": "目标实体类型",
+      "target_name": "目标实体",
+      "support_count": 1,
+      "target_support": 2,
+      "priority": "high|medium|low",
+      "reason": "该边当前只有单篇支持，若用于强结论需补强"
     }}
   ]
 }}
@@ -313,9 +331,12 @@ def make_content_node(model=None,
         plan = state.get("plan") or {}
         knowledge = state.get("knowledge") or {}
         run_id = state.get("run_id")
+        retrieval = plan.get("retrieval") or {}
+        max_gaps = 20
         log_study_event(conn, settings, "content_builder", run_id, "running")
         draft = None
         model_error = None
+        edge_gaps: list[dict[str, Any]] = []
         if model is not None:
             prompt = CONTENT_PROMPT.replace(
                 "{plan}", json.dumps(plan, ensure_ascii=False, indent=2)
@@ -334,11 +355,30 @@ def make_content_node(model=None,
                 raw = getattr(msg, "content", str(msg))
                 parsed = parse_json_object(raw)
                 draft = normalize_draft(parsed, plan, knowledge)
+                edge_gaps = normalize_edge_gaps(
+                    parsed.get("edge_gaps") if isinstance(parsed, dict) else [],
+                    max_gaps,
+                )
+                known_pattern_ids = {
+                    str(p.get("pattern_id") or "")
+                    for p in knowledge.get("patterns") or []
+                    if str(p.get("pattern_id") or "")
+                }
+                edge_gaps = [
+                    gap for gap in edge_gaps
+                    if gap.get("pattern_id") in known_pattern_ids
+                ]
             except Exception as exc:  # noqa: BLE001
                 logger.warning("内容节点 LLM 调用失败，回退确定性转写: %s", exc)
                 model_error = str(exc)
         if draft is None:
             draft = deterministic_draft(plan, knowledge)
+        if not edge_gaps:
+            edge_gaps = select_low_support_gaps(
+                knowledge.get("patterns") or [],
+                min_support=max(2, int(retrieval.get("min_support_target") or 2)),
+                limit=max_gaps,
+            )
         if model_error:
             draft["model_error"] = model_error
         log_study_event(
@@ -347,8 +387,9 @@ def make_content_node(model=None,
                 "title": draft.get("title"),
                 "sections": len(draft.get("sections") or []),
                 "strategies": len(draft.get("strategies") or []),
+                "edge_gaps": len(edge_gaps),
                 "markdown_chars": len(draft.get("markdown") or ""),
             })
-        return {"draft": draft, "status": "drafted"}
+        return {"draft": draft, "edge_gaps": edge_gaps, "status": "drafted"}
 
     return content_node

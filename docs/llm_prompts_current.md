@@ -1,4 +1,4 @@
-# 当前 LLM 提示词清单（v0.1.2）
+# 当前 LLM 提示词清单（v0.2.0）
 
 > 生成自各节点的 Python 常量，未手工改写。
 
@@ -7,7 +7,7 @@
 | 节点/角色 | 模型 | 来源 |
 |---|---|---|
 | 文献检索 retriever | deepseek-v4-flash | `retrieval/llm.py` |
-| 质量评估 quality | deepseek-v4-flash | `quality/llm.py` |
+| 质量控制 quality | deepseek-v4-flash | `quality/llm.py` |
 | 知识提取 knowledge | deepseek-v4-flash | `knowledge/extractor.py` |
 | 工作规划 planner | deepseek-v4-flash | `study/planner.py` |
 | 内容形成 content | deepseek-v4-flash | `study/content.py` |
@@ -74,7 +74,7 @@
 原始元数据：{payload}
 ```
 
-## 二、质量评估节点
+## 二、质量控制节点（质量评估子任务）
 
 ### 2.1 质量因子评分 QUALITY_PROMPT_TEMPLATE
 

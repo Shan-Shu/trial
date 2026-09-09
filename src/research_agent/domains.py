@@ -96,6 +96,30 @@ DOMAIN_PROFILES: dict[str, dict[str, Any]] = {
             "improves_upon", "enables", "is_a", "related_to",
         ],
     },
+    "humanities_social_science": {
+        "label": "人文社科/马克思主义理论",
+        "dimensions": [
+            "核心命题与经典文本依据",
+            "历史背景与史实",
+            "主体、组织与制度机制",
+            "实践路径与工作方法",
+            "效果、经验与历史意义",
+            "理论演变与当代启示",
+            "学术争鸣与开放问题",
+        ],
+        "candidate_entity_types": [
+            "Concept", "Theory", "Principle", "Document", "Argument",
+            "HistoricalEvent", "War", "Institution", "Organization",
+            "Actor", "Person", "SocialProcess", "Practice", "Policy",
+            "Outcome", "Relationship",
+        ],
+        "candidate_relation_types": [
+            "based_on", "part_of", "promotes", "enables", "supports",
+            "reflects", "represents", "explains", "results_in",
+            "manifests_in", "depends_on", "emphasizes", "derived_from",
+            "is_a", "related_to",
+        ],
+    },
 }
 
 
@@ -114,6 +138,12 @@ DOMAIN_HINTS = [
         ("材料", "支架", "涂层", "力学", "生物材料", "工艺", "composite",
          "scaffold", "material"),
         "materials",
+    ),
+    (
+        ("人民战争", "人民群众", "群众路线", "全民族抗战", "抗战胜利",
+         "解放战争", "人民军队", "伟力", "战争胜利", "历史唯物主义",
+         "马克思主义", "党史", "群众工作", "政治学", "社会制度"),
+        "humanities_social_science",
     ),
 ]
 

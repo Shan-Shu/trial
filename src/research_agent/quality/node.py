@@ -1,4 +1,4 @@
-"""质量评估节点。
+"""质量控制节点：在文献质量评估之外承担全局一致性控制。
 
 流程：
 1. 装载文献 → （可选）用 OpenAlex 刷新被引/H 指数等权威性数据；
@@ -8,6 +8,8 @@
    - Q >= 0.8            → decision='knowledge'  直接送知识提取；
    - 0.5 <= Q < 0.8      → decision='flagged'    标记后送知识提取；
    - Q < 0.5             → decision='human'      人工审核。
+4. 每次质量控制节点运行时检查本体节点增量；达到阈值后按 IUPAC Gold Book /
+   ChEBI 领域词典做全局实体/关系归并。
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ from typing import Any
 from research_agent.config import Settings, settings as default_settings
 from research_agent.db import connect, get_paper, log_event, save_quality_result, upsert_paper
 from research_agent.quality.llm import assess_with_llm
+from research_agent.quality.control import maybe_global_merge
 from research_agent.quality.scoring import check_metadata_completeness, quality_assess
 from research_agent.retrieval.api_clients import ApiHub
 
@@ -53,7 +56,7 @@ def make_quality_node(api: ApiHub | None = None,
                       conn: sqlite3.Connection | None = None,
                       settings: Settings | None = None,
                       offline: bool = False):
-    """构造 LangGraph 质量评估节点。model 为绑定 GLM 4.7 Flash 的 ChatModel。"""
+    """构造 LangGraph 质量控制节点。model 为绑定 GLM 4.7 Flash 的 ChatModel。"""
     settings = settings or default_settings
 
     def quality_node(state: dict) -> dict:
@@ -111,6 +114,9 @@ def make_quality_node(api: ApiHub | None = None,
             result["needs_review"] = bool(needs_review)
             result["rationale"] = rationale
             save_quality_result(db, result)
+            quality_control = maybe_global_merge(db, settings)
+            if quality_control.get("triggered"):
+                result["quality_control"] = quality_control
             log_event(db, "quality", "assessed", key,
                       {"decision": decision, "missing": missing,
                        "A": result.get("authority"), "T": result.get("timeliness"),

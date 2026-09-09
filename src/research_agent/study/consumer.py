@@ -17,6 +17,10 @@ from research_agent.config import Settings, settings as default_settings
 from research_agent.db import connect
 from research_agent.domains import normalize_domain_profile
 from research_agent.ontology import store as ont
+from research_agent.retrieval.skills import (
+    build_skill_request,
+    normalize_edge_gaps,
+)
 from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str
 
@@ -157,13 +161,14 @@ def mine_ontology_evidence(conn: sqlite3.Connection,
     }
 
 
-def build_retrieval_request(plan: dict[str, Any] | None) -> dict[str, Any]:
+def build_retrieval_request(plan: dict[str, Any] | None,
+                            edge_gaps: Any = None) -> dict[str, Any]:
     plan = plan or {}
     mission = plan.get("mission") or {}
     terms = [clean_str(t) for t in mission.get("seed_terms") or [] if clean_str(t)]
     if not terms:
         terms = [clean_str(plan.get("domain"), "research")]
-    return {
+    request = {
         "reason": "当前本体/本地语料中没有达到最低阈值的可溯源模式",
         "seed_terms": terms,
         "max_results": int(mission.get("max_results") or 80),
@@ -173,6 +178,10 @@ def build_retrieval_request(plan: dict[str, Any] | None) -> dict[str, Any]:
             plan.get("goal") or ""),
         "suggested_route": "retrieval -> quality -> knowledge",
     }
+    if edge_gaps:
+        request["edge_gaps"] = normalize_edge_gaps(edge_gaps)
+        request["reason"] = "内容节点识别出需要补强的低支持本体边"
+    return build_skill_request(plan, edge_gaps=request.get("edge_gaps"))
 
 
 def build_design_context(knowledge: dict[str, Any],
@@ -249,13 +258,31 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
             bundle = mine_ontology_evidence(db, mission)
             collection_report = state.get("collection_report") or {}
             force_collect = bool(state.get("force_collect"))
-            if (force_collect or not bundle["patterns"]) and collector is not None:
+            edge_gaps = state.get("edge_gaps")
+            gap_done = bool(state.get("gap_retrieval_done"))
+            plan_retrieval = plan.get("retrieval") or {}
+            evidence_gap_requested = bool(
+                plan_retrieval.get("evidence_gap_enabled")
+                or plan_retrieval.get("strategy") == "evidence_gap"
+            )
+            collect_gaps = bool(state.get("collect_gaps")) or bool(
+                edge_gaps and evidence_gap_requested and not gap_done
+            )
+            should_collect = force_collect or collect_gaps or not bundle["patterns"]
+            if should_collect and collector is not None:
                 try:
-                    collection_report = collector(build_retrieval_request(plan)) or {}
+                    collection_report = collector(
+                        build_retrieval_request(
+                            plan,
+                            edge_gaps=edge_gaps if collect_gaps else None,
+                        )
+                    ) or {}
                     bundle = mine_ontology_evidence(db, mission)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("补充语料失败: %s", exc)
                     collection_report["error"] = str(exc)
+            if collect_gaps:
+                gap_done = True
             if not bundle["patterns"]:
                 log_study_event(
                     conn, settings, "knowledge_consumer", run_id,
@@ -267,6 +294,8 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
                     "collection_report": collection_report,
                     "retrieval_request": build_retrieval_request(plan),
                     "force_collect": False,
+                    "collect_gaps": False,
+                    "gap_retrieval_done": gap_done,
                     "status": "needs_collection",
                 }
             bundle["design_context"] = build_design_context(bundle, plan)
@@ -284,6 +313,8 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
                 "collection_report": collection_report,
                 "retrieval_request": None,
                 "force_collect": False,
+                "collect_gaps": False,
+                "gap_retrieval_done": gap_done,
                 "status": "consumed",
             }
         finally:

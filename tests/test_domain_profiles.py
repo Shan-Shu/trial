@@ -64,6 +64,16 @@ class DomainProfileTest(unittest.TestCase):
         self.assertEqual(p["domain_kind"], "biomedicine")
         self.assertEqual(p["dimensions"], ["适应症", "机制"])
 
+    def test_humanities_social_science_profile_detected(self):
+        p = normalize_domain_profile(
+            None,
+            "",
+            "战争胜利的伟力深藏在人民群众之中，请按人文社科问题研讨",
+        )
+        self.assertEqual(p["domain_kind"], "humanities_social_science")
+        self.assertIn("Concept", p["candidate_entity_types"])
+        self.assertIn("历史背景与史实", p["dimensions"])
+
     def test_retrieval_prompt_no_biomedical_hardcode(self):
         prompt = PLAN_PROMPT_TEMPLATE
         self.assertNotIn("适应症", prompt)

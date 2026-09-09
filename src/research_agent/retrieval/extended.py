@@ -125,6 +125,82 @@ class EuropePmcClient:
             "pdf_url": pdf_url,
         }
 
+    @staticmethod
+    def _source_id(rec: dict[str, Any]) -> tuple[str, str] | None:
+        """从已规范化记录中解析 Europe PMC source/id。"""
+        key = str(rec.get("paper_key") or "")
+        if key.startswith("europepmc:"):
+            parts = key.split(":", 2)
+            if len(parts) == 3 and parts[1] and parts[2]:
+                return parts[1].upper(), parts[2]
+        if rec.get("pmid"):
+            return "MED", str(rec["pmid"])
+        if rec.get("pmcid"):
+            return "PMC", str(rec["pmcid"]).lstrip("PMC")
+        return None
+
+    @staticmethod
+    def _normalize_reference(row: dict[str, Any]) -> dict[str, Any]:
+        source = str(row.get("source") or "MED").upper()
+        rid = str(row.get("id") or row.get("pmid") or row.get("pmcid") or "").strip()
+        title = str(row.get("title") or row.get("fullTitle") or "").strip()
+        pmid = str(row.get("pmid") or "").strip()
+        pmcid = str(row.get("pmcid") or "").strip()
+        if source not in ("MED", "PMC"):
+            source = "MED" if pmid else "PMC"
+        if rid and source:
+            key = f"europepmc:{source}:{rid}"
+        elif pmid:
+            key = f"pubmed:{pmid}"
+        elif title:
+            key = f"europepmc:title:{title.lower()[:120]}"
+        else:
+            key = None
+        return {
+            "paper_key": key,
+            "source": "europepmc",
+            "title": title,
+            "abstract": None,
+            "doi": str(row.get("doi") or "").strip() or None,
+            "venue": (str(row.get("journalTitle") or "").strip()
+                      or str(row.get("journalAbbreviation") or "").strip() or None),
+            "pub_year": row.get("pubYear"),
+            "publication_status": "Published",
+            "authors": [
+                {"name": n.strip(), "affiliations": []}
+                for n in str(row.get("authorString") or "").split(",") if n.strip()
+            ],
+            "pmid": pmid or None,
+            "pmcid": pmcid or None,
+            "pdf_url": None,
+            "is_open_access": None,
+        }
+
+    def _fetch_cited_list(self, rec: dict[str, Any],
+                          endpoint: str) -> list[dict[str, Any]]:
+        parsed = self._source_id(rec)
+        if parsed is None:
+            return []
+        source, rid = parsed
+        data = _get_json(
+            f"{self.BASE}/{source}/{rid}/{endpoint}",
+            params={"format": "json", "pageSize": 100, "page": 1},
+            timeout=45,
+        )
+        if not data:
+            return []
+        key = f"{endpoint}List"
+        items = ((data.get(key) or {}).get(endpoint.rstrip("s")) or [])
+        return [self._normalize_reference(r) for r in items]
+
+    def references(self, rec: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回某条 Europe PMC/PubMed 记录的参考文献列表。"""
+        return self._fetch_cited_list(rec, "references")
+
+    def citations(self, rec: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回某条记录在 Europe PMC 中被引用的论文。"""
+        return self._fetch_cited_list(rec, "citations")
+
 
 class SemanticScholarSearcher:
     """Semantic Scholar Graph API：检索 + Open Access PDF 定位。"""

@@ -17,6 +17,9 @@ from langchain_core.messages import HumanMessage
 
 from research_agent.config import Settings, settings as default_settings
 from research_agent.domains import normalize_domain_profile
+from research_agent.retrieval.skills import (
+    normalize_retrieval,
+)
 from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
 
@@ -33,10 +36,16 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
    可以组合哪些方向、最少生成几个候选、如何判断“不是简单复述”；
 4. 再把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
 5. 领域画像可随任务生成，但任务性质和生成要求必须是领域无关的；
-6. seed_terms 必须是英文检索词，覆盖领域核心词、方法/机理、评价与应用词；
-   禁止把用户整句话直接作为 seed_terms 或 domain；
+6. seed_terms 使用能直接投递到目标文献库的检索词：国际学术库用英文，
+   NCPSSD/CNKI 等中文库用中文；禁止把用户整句话直接作为 seed_terms 或 domain；
 7. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
-8. 只输出 JSON 对象，不要代码块，不要解释。
+8. 根据用户需求判断检索策略 retrieval：
+   - 默认 broad：先做广泛主题检索；
+   - 若用户要求对本体已有边补强、多源验证、共识或证据缺口，启用
+     evidence_gap（evidence_gap_enabled=true）；
+   - 仅当用户明确要求“某一单领域的精深挖掘、系统追溯、参考文献/引用溯源”时，
+     才启用 deep_single_domain；不得对普通综述自动启用递归溯源。
+9. 只输出 JSON 对象，不要代码块，不要解释。
 
 示例（只参考字段风格，不要照抄用户原话作为 domain/seed_terms）：
 用户原话：尝试提出一种炔酰胺构建多元氮杂化合物的新方法
@@ -63,7 +72,7 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
     "evaluation_criteria": ["新颖性", "可行性", "可解释性", "可验证性"]
   }},
   "domain_profile": {{
-    "domain_kind": "chemistry|biomedicine|materials|general",
+    "domain_kind": "chemistry|biomedicine|materials|humanities_social_science|general",
     "dimensions": ["该领域应覆盖的检索/分析维度"],
     "candidate_entity_types": ["首轮可试用的实体类型"],
     "candidate_relation_types": ["首轮可试用的关系类型"],
@@ -76,6 +85,15 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
     "min_confidence": 0.6,
     "collection_mode": "broad",
     "recency_window": "2018-01-01:{today}"
+  }},
+  "retrieval": {{
+    "strategy": "broad|evidence_gap|deep_single_domain",
+    "evidence_gap_enabled": false,
+    "deep_single_domain_enabled": false,
+    "min_support_target": 2,
+    "max_skill_rounds": 2,
+    "relevance_gate": "strict",
+    "reference_direction": "both"
   }},
   "deliverable": {{
     "format": "markdown",
@@ -194,6 +212,7 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
         "recency_window": clean_str(
             mission_raw.get("recency_window"), f"2018-01-01:{today}"),
     }
+    retrieval = normalize_retrieval(raw.get("retrieval"), request)
     analysis = [clean_str(t) for t in raw.get("analysis_targets") or [] if clean_str(t)]
     if not analysis:
         analysis = ["方法", "材料", "性能指标", "应用", "开放问题"]
@@ -212,6 +231,7 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
             raw.get("domain_profile"), domain, request),
         "analysis_targets": analysis,
         "mission": mission,
+        "retrieval": retrieval,
         "deliverable": {
             "format": clean_str(deliverable.get("format"), "markdown"),
             "sections_policy": "emergent",

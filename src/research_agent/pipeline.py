@@ -130,7 +130,8 @@ def process_papers(keys: list[str], services: Services | None = None,
 def run_topic(query: str, max_results: int = 3, services: Services | None = None,
               conn: sqlite3.Connection | None = None,
               dimensions: list[str] | None = None,
-              domain_profile: dict | None = None) -> dict[str, Any]:
+              domain_profile: dict | None = None,
+              fixed_queries: list[str] | None = None) -> dict[str, Any]:
     """完整流程：检索批量入库 → 逐篇 质量评估+知识提取。返回检索报告与逐篇结果。"""
     services = services or Services()
     s = services.settings
@@ -140,7 +141,7 @@ def run_topic(query: str, max_results: int = 3, services: Services | None = None
         ingest = ingest_search_results(
             query, max_results, api=services.api,
             model=services.retriever_model, conn=db, settings=s,
-            dimensions=dimensions)
+            dimensions=dimensions, fixed_queries=fixed_queries)
         keys = ingest["paper_keys"]
         per_paper = process_papers(keys, services, db,
                                    domain_profile=domain_profile) if keys else []
@@ -173,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--source",
         choices=["pubmed", "arxiv", "both", "europepmc",
-                 "semantic_scholar", "openalex", "fulltext", "all"],
+                 "semantic_scholar", "openalex", "ncpssd", "fulltext", "all"],
         default="fulltext",
         help="文献来源；fulltext=Europe PMC/arXiv/Semantic Scholar/OpenAlex 全文优先")
     ap.add_argument("--db", help="SQLite 数据库路径（默认 data/research_agent.db）")

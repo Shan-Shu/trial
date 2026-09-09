@@ -37,6 +37,9 @@ class StudyState(TypedDict, total=False):
     review: dict
     decision: str
     review_rounds: int
+    edge_gaps: list
+    collect_gaps: bool
+    gap_retrieval_done: bool
     status: str
     error: str
 
@@ -68,6 +71,17 @@ def _route_after_reviewer(state: StudyState) -> str:
     return "content_builder"
 
 
+def _route_after_content(state: StudyState) -> str:
+    """内容给出证据缺口后，若 planner 开启证据缺口策略则先回补再审核。"""
+    plan = state.get("plan") or {}
+    retrieval = plan.get("retrieval") or {}
+    if (state.get("edge_gaps") and not state.get("gap_retrieval_done")
+            and (retrieval.get("evidence_gap_enabled")
+                 or retrieval.get("strategy") == "evidence_gap")):
+        return "knowledge_consumer"
+    return "reviewer"
+
+
 def build_study_graph(services: StudyServices | None = None,
                       conn: sqlite3.Connection | None = None,
                       max_results_override: int | None = None):
@@ -96,7 +110,11 @@ def build_study_graph(services: StudyServices | None = None,
         _route_after_consumer,
         {"content": "content_builder", "needs_collection": END},
     )
-    g.add_edge("content_builder", "reviewer")
+    g.add_conditional_edges(
+        "content_builder",
+        _route_after_content,
+        {"knowledge_consumer": "knowledge_consumer", "reviewer": "reviewer"},
+    )
     g.add_conditional_edges(
         "reviewer",
         _route_after_reviewer,
@@ -191,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--source",
         choices=["pubmed", "arxiv", "both", "europepmc",
-                 "semantic_scholar", "openalex", "fulltext", "all"],
+                 "semantic_scholar", "openalex", "ncpssd", "fulltext", "all"],
         default="fulltext")
     args = ap.parse_args(argv)
 

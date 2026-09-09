@@ -9,6 +9,11 @@ import logging
 from typing import Any
 
 from research_agent.study.json_utils import clean_str
+from research_agent.retrieval.skills import (
+    STRATEGY_EVIDENCE_GAP,
+    normalize_retrieval_strategy,
+    plan_evidence_gap_queries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +32,29 @@ def collect_mission(request: dict[str, Any],
     per = per_topic or max(1, min(10, max_results // len(terms)))
     domain_profile = request.get("domain_profile") or None
     dimensions = (domain_profile or {}).get("dimensions") or None
+    edge_gaps = request.get("edge_gaps") or []
+    strategy = normalize_retrieval_strategy(
+        ((request.get("retrieval") or {}).get("strategy")), "")
+    evidence_mode = bool(edge_gaps) and strategy == STRATEGY_EVIDENCE_GAP
     collected: list[str] = []
     errors: list[dict[str, Any]] = []
     for term in terms[:max_topics]:
+        fixed_queries: list[str] | None = None
+        if evidence_mode:
+            plans = plan_evidence_gap_queries(
+                edge_gaps,
+                topic=term,
+                model=None,
+                max_queries=min(10, max(1, per)),
+                limit_gaps=min(20, len(edge_gaps)),
+            )
+            fixed_queries = [str(p.get("query") or "") for p in plans
+                             if str(p.get("query") or "").strip()]
         try:
             out = run_topic(term, max_results=per, services=services,
                             dimensions=dimensions,
-                            domain_profile=domain_profile)
+                            domain_profile=domain_profile,
+                            fixed_queries=fixed_queries)
             keys = (out.get("ingest") or {}).get("paper_keys") or []
             collected.extend(keys)
             logger.info("collect topic=%s papers=%d", term, len(keys))

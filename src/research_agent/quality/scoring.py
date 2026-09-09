@@ -185,17 +185,22 @@ def quality_assess(rec: dict[str, Any],
 
 
 def check_metadata_completeness(rec: dict[str, Any]) -> tuple[bool, list[str]]:
-    """检查：全部作者、作者单位、发表情况、DOI 是否齐备。"""
+    """检查：全部作者、作者单位、发表情况、DOI 是否齐备。
+
+    NCPSSD 等中文公益性期刊源常不提供 DOI，机构也可能由统一出版主体承担，
+    因此对这些来源只要求作者、期刊/出版信息和年份齐备，缺失字段单独记录。
+    """
     missing: list[str] = []
+    source = str(rec.get("source") or "").lower()
     authors = rec.get("authors") or []
     if not authors or any(not (a.get("name") or "").strip() for a in authors):
         missing.append("authors")
     affs = [a.get("affiliations") or [] for a in authors]
-    if not any(x for sub in affs for x in sub):
+    if source != "ncpssd" and not any(x for sub in affs for x in sub):
         missing.append("affiliations")
     venue_ok = bool((rec.get("venue") or "").strip()) or bool((rec.get("source_type") or "").strip())
     if not venue_ok or not rec.get("pub_year"):
         missing.append("publication")
-    if not (rec.get("doi") or "").strip():
+    if source != "ncpssd" and not (rec.get("doi") or "").strip():
         missing.append("doi")
     return not missing, missing

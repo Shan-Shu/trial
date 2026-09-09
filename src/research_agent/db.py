@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS papers (
     citation_count   INTEGER,
     avg_h_index      REAL,
     authors_meta     TEXT DEFAULT '[]',
+    volume           TEXT,
+    issue            TEXT,
+    pages            TEXT,
+    keywords         TEXT,
+    publisher        TEXT,
+    language         TEXT,
     pdf_sha256       TEXT,
     pdf_size         INTEGER,
     pdf_blob         BLOB,
@@ -67,6 +73,18 @@ CREATE TABLE IF NOT EXISTS quality_results (
     assessed_at      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS human_reviews (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    paper_key      TEXT,
+    action         TEXT,
+    decision       TEXT,
+    rationale      TEXT,
+    custom_result  TEXT,
+    reviewed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_human_reviews_paper
+    ON human_reviews(paper_key);
+
 CREATE TABLE IF NOT EXISTS processing_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     paper_key  TEXT,
@@ -91,7 +109,16 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     # 老库迁移：补充新增列（若缺）
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(papers)")}
-    for col, decl in (("pmcid", "TEXT"), ("fulltext_source", "TEXT")):
+    for col, decl in (
+        ("pmcid", "TEXT"),
+        ("fulltext_source", "TEXT"),
+        ("volume", "TEXT"),
+        ("issue", "TEXT"),
+        ("pages", "TEXT"),
+        ("keywords", "TEXT"),
+        ("publisher", "TEXT"),
+        ("language", "TEXT"),
+    ):
         if col not in cols:
             conn.execute(f"ALTER TABLE papers ADD COLUMN {col} {decl}")
     conn.commit()
@@ -140,9 +167,11 @@ def upsert_paper(conn: sqlite3.Connection, rec: dict[str, Any]) -> str:
         INSERT INTO papers(
             paper_key, source, title, abstract, doi, venue, venue_issn, source_type,
             pmcid, fulltext_source, pub_year, pub_date, publication_status,
-            citation_count, avg_h_index, authors_meta, pdf_sha256, pdf_size,
+            citation_count, avg_h_index, authors_meta,
+            volume, issue, pages, keywords, publisher, language,
+            pdf_sha256, pdf_size,
             pdf_blob, clean_text, clean_text_sha256, status, created_at, updated_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(paper_key) DO UPDATE SET
             source=excluded.source, title=excluded.title, abstract=excluded.abstract,
             doi=excluded.doi, venue=excluded.venue, venue_issn=excluded.venue_issn,
@@ -154,6 +183,9 @@ def upsert_paper(conn: sqlite3.Connection, rec: dict[str, Any]) -> str:
             pdf_size=excluded.pdf_size, pdf_blob=excluded.pdf_blob,
             clean_text=excluded.clean_text,
             clean_text_sha256=excluded.clean_text_sha256,
+            volume=excluded.volume, issue=excluded.issue, pages=excluded.pages,
+            keywords=excluded.keywords, publisher=excluded.publisher,
+            language=excluded.language,
             status=excluded.status, updated_at=excluded.updated_at
         """,
         (
@@ -163,6 +195,8 @@ def upsert_paper(conn: sqlite3.Connection, rec: dict[str, Any]) -> str:
             rec.get("pub_year"), rec.get("pub_date"),
             rec.get("publication_status"), rec.get("citation_count"),
             rec.get("avg_h_index"), json.dumps(authors, ensure_ascii=False),
+            rec.get("volume"), rec.get("issue"), rec.get("pages"),
+            rec.get("keywords"), rec.get("publisher"), rec.get("language"),
             rec.get("pdf_sha256"), rec.get("pdf_size"), rec.get("pdf_blob"),
             rec.get("clean_text"), rec.get("clean_text_sha256"),
             rec.get("status", "ingested"), created, now,

@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from research_agent.config import Settings, settings as default_settings
-from research_agent.db import connect
+from research_agent.db import (
+    connect,
+    get_paper,
+    get_quality_result,
+    log_event,
+    save_quality_result,
+    upsert_paper,
+    utcnow,
+)
 
 
 def _open(db_path: Path | str | None = None) -> sqlite3.Connection:
@@ -29,6 +37,59 @@ def _count(conn: sqlite3.Connection, table: str) -> int:
     if not _table(conn, table):
         return 0
     return int(conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"])
+
+
+def list_databases() -> list[dict[str, Any]]:
+    """扫描 data 目录，返回可访问的 SQLite 动态本体库清单。"""
+    out: list[dict[str, Any]] = []
+    if not default_settings.data_dir.exists():
+        return out
+    for path in sorted(default_settings.data_dir.glob("*.db")):
+        item = {
+            "path": str(path),
+            "name": path.name,
+            "size": path.stat().st_size if path.exists() else 0,
+            "papers": 0,
+            "nodes": 0,
+            "edges": 0,
+            "runs": 0,
+            "logs": 0,
+            "last_activity": None,
+            "has_ontology": False,
+        }
+        try:
+            conn = sqlite3.connect(str(path))
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            item["has_ontology"] = "ontology_nodes" in tables
+            for table in ("papers", "ontology_nodes", "ontology_edges",
+                          "ontology_runs", "processing_log"):
+                if table in tables:
+                    val = int(conn.execute(
+                        f"SELECT COUNT(*) AS c FROM {table}"
+                    ).fetchone()["c"])
+                    if table == "papers":
+                        item["papers"] = val
+                    elif table == "ontology_nodes":
+                        item["nodes"] = val
+                    elif table == "ontology_edges":
+                        item["edges"] = val
+                    elif table == "ontology_runs":
+                        item["runs"] = val
+                    else:
+                        item["logs"] = val
+            if "processing_log" in tables:
+                row = conn.execute(
+                    "SELECT MAX(ts) AS ts FROM processing_log"
+                ).fetchone()
+                item["last_activity"] = row["ts"]
+            conn.close()
+        except sqlite3.Error:
+            item["has_ontology"] = False
+        out.append(item)
+    return out
 
 
 def _latest_run_per_paper(conn: sqlite3.Connection) -> dict[str, dict]:
@@ -223,7 +284,7 @@ def agent_status(db_path: Path | str | None = None,
         agents = {
             "retrieval": {"id": "retrieval", "label": "文献检索节点",
                           "desc": "检索 / PDF 入库 / 清洗 / 元数据回补"},
-            "quality": {"id": "quality", "label": "质量评估节点",
+            "quality": {"id": "quality", "label": "质量控制节点",
                         "desc": "A/T/Q 评分 / 路由 / 人工审核判定"},
             "knowledge": {"id": "knowledge", "label": "知识提取节点",
                           "desc": "预处理 / 实体关系事件抽取 / 动态本体写入"},
@@ -277,6 +338,104 @@ def agent_status(db_path: Path | str | None = None,
             if n_human and agents["human_review"]["paper_count"] == 0:
                 agents["human_review"]["paper_count"] = n_human
         return list(agents.values()), recent_events
+    finally:
+        conn.close()
+
+
+def node_status(db_path: Path | str | None = None,
+                recent: int = 30) -> dict[str, Any]:
+    """聚合数据构建与研究流程各节点状态、事件、日志。"""
+    defs: list[dict[str, Any]] = [
+        {"id": "retrieval", "group": "数据构建", "label": "文献检索节点",
+         "desc": "检索 / PDF 入库 / 清洗 / 元数据回补"},
+        {"id": "quality", "group": "数据构建", "label": "质量控制节点",
+         "desc": "A/T/Q 评分 / 路由 / 领域词典全局归并"},
+        {"id": "knowledge", "group": "数据构建", "label": "知识提取节点",
+         "desc": "预处理 / 实体关系事件抽取 / 动态本体写入"},
+        {"id": "human_review", "group": "数据构建", "label": "人工审核",
+         "desc": "低质量或元数据无法补全的文献"},
+        {"id": "planner", "group": "研究流程", "label": "工作规划节点",
+         "desc": "解析用户请求，判断检索策略并生成任务单"},
+        {"id": "knowledge_consumer", "group": "研究流程", "label": "知识消费节点",
+         "desc": "读取本体模式/证据，输出证据缺口或请求补集"},
+        {"id": "content_builder", "group": "研究流程", "label": "内容形成节点",
+         "desc": "生成可溯源草稿，并返回需要补强的边"},
+        {"id": "reviewer", "group": "研究流程", "label": "审核校对节点",
+         "desc": "核查引用、证据支持与覆盖缺口"},
+    ]
+    conn = _open(db_path)
+    try:
+        recent_events: list[dict[str, Any]] = []
+        if _table(conn, "processing_log"):
+            rows = conn.execute(
+                "SELECT id, paper_key, node, event, details, ts "
+                "FROM processing_log ORDER BY id DESC LIMIT ?",
+                (max(100, recent * 20),),
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["details"] = json.loads(d.get("details") or "null")
+                except json.JSONDecodeError:
+                    d["details"] = None
+                recent_events.append(d)
+        nodes: list[dict[str, Any]] = []
+        for d in defs:
+            nid = d["id"]
+            events: list[dict[str, Any]] = []
+            for ev in recent_events:
+                bucket = None
+                if nid == "human_review" and ev["node"] == "quality" \
+                        and ev["event"] == "human-review":
+                    bucket = "human_review"
+                elif nid == "study" and ev["node"] == "study":
+                    bucket = "study"
+                elif ev["node"] == "study" and ev["event"] == nid:
+                    bucket = nid
+                elif ev["node"] == nid:
+                    bucket = nid
+                if bucket == nid:
+                    events.append(ev)
+            last = events[0] if events else None
+            det = (last.get("details") or {}) if last else {}
+            status = "idle"
+            if last:
+                if det.get("status") in ("running",):
+                    status = "running"
+                elif det.get("status") == "error":
+                    status = "error"
+                elif det.get("status") == "needs_collection":
+                    status = "needs_collection"
+                elif nid == "human_review" or det.get("decision") == "human":
+                    status = "waiting"
+                else:
+                    status = "done"
+            count = 0
+            paper_count = 0
+            if _table(conn, "processing_log"):
+                if nid == "human_review":
+                    cond = "node='quality' AND event='human-review'"
+                elif nid in {x["id"] for x in defs[4:]}:
+                    cond = f"node='study' AND event='{nid}'"
+                else:
+                    cond = f"node='{nid}'"
+                row = conn.execute(
+                    f"SELECT COUNT(*) AS c, COUNT(DISTINCT paper_key) AS pc "
+                    f"FROM processing_log WHERE {cond}"
+                ).fetchone()
+                count = int(row["c"] or 0)
+                paper_count = int(row["pc"] or 0)
+            nodes.append({
+                **d,
+                "status": status,
+                "count": count,
+                "paper_count": paper_count,
+                "last_ts": last["ts"] if last else None,
+                "last_event": last["event"] if last else None,
+                "details": det,
+                "events": events[:5],
+            })
+        return {"nodes": nodes, "recent": recent_events[:recent]}
     finally:
         conn.close()
 
@@ -397,14 +556,31 @@ def study_status(db_path: Path | str | None = None,
         conn.close()
 
 
-def activity_log(limit: int = 80, db_path: Path | str | None = None) -> list[dict[str, Any]]:
+def activity_log(limit: int = 80,
+                 db_path: Path | str | None = None,
+                 node: str | None = None,
+                 event: str | None = None,
+                 search: str | None = None) -> list[dict[str, Any]]:
     conn = _open(db_path)
     try:
         if not _table(conn, "processing_log"):
             return []
+        sql = "SELECT id, paper_key, node, event, details, ts FROM processing_log WHERE 1=1"
+        params: list[Any] = []
+        if node:
+            sql += " AND node=?"
+            params.append(node)
+        if event:
+            sql += " AND event=?"
+            params.append(event)
+        if search:
+            sql += " AND (paper_key LIKE ? OR details LIKE ?)"
+            like = f"%{search}%"
+            params.extend([like, like])
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
         rows = conn.execute(
-            "SELECT paper_key, node, event, details, ts FROM processing_log "
-            "ORDER BY id DESC LIMIT ?", (limit,)
+            sql, params
         ).fetchall()
         out = []
         for r in rows:
@@ -415,6 +591,174 @@ def activity_log(limit: int = 80, db_path: Path | str | None = None) -> list[dic
                 d["details"] = None
             out.append(d)
         return out
+    finally:
+        conn.close()
+
+
+def run_planner_request(request_text: str,
+                        db_path: Path | str | None = None) -> dict[str, Any]:
+    """在工作规划节点上执行一条用户指令，返回任务单并写入事件日志。"""
+    from research_agent.config import Settings
+    from research_agent.study.planner import make_planner_node
+
+    settings = Settings(db_path=Path(db_path or default_settings.db_path))
+    conn = _open(settings.db_path)
+    try:
+        node = make_planner_node(None, conn=conn, settings=settings)
+        out = node({"request": str(request_text or "").strip()})
+        return {
+            "status": out.get("status"),
+            "plan": out.get("plan") or {},
+            "db": str(settings.db_path),
+        }
+    finally:
+        conn.close()
+
+
+HUMAN_REVIEW_PRESETS = {
+    "accept": {
+        "label": "通过并进入知识提取",
+        "decision": "knowledge",
+        "needs_review": False,
+        "status": "ingested",
+    },
+    "accept_flagged": {
+        "label": "标记后进入知识提取",
+        "decision": "flagged",
+        "needs_review": True,
+        "status": "ingested",
+    },
+    "enrich": {
+        "label": "退回元数据补全",
+        "decision": "enrich",
+        "needs_review": False,
+        "status": "needs_enrich",
+    },
+    "reject": {
+        "label": "拒绝并排除该文献",
+        "decision": "rejected",
+        "needs_review": False,
+        "status": "rejected",
+    },
+}
+
+
+def human_review_items(db_path: Path | str | None = None,
+                       include_history: bool = False) -> dict[str, Any]:
+    """返回待人工审核文献与可选历史记录。"""
+    conn = _open(db_path)
+    try:
+        pending: list[dict[str, Any]] = []
+        history: list[dict[str, Any]] = []
+        if _table(conn, "papers"):
+            rows = conn.execute(
+                """
+                SELECT p.paper_key, p.source, p.title, p.venue, p.pub_year,
+                       p.status, p.created_at,
+                       substr(COALESCE(p.clean_text, ''), 1, 1800) AS clean_preview,
+                       q.quality, q.authority, q.timeliness, q.decision,
+                       q.needs_review, q.rationale, q.assessed_at
+                FROM papers p
+                LEFT JOIN quality_results q ON q.paper_key = p.paper_key
+                WHERE p.status = 'human_review'
+                ORDER BY p.created_at DESC
+                """
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                d["presets"] = list(HUMAN_REVIEW_PRESETS.keys())
+                pending.append(d)
+        if include_history and _table(conn, "human_reviews"):
+            rows = conn.execute(
+                """
+                SELECT r.id, r.paper_key, r.action, r.decision, r.rationale,
+                       r.custom_result, r.reviewed_at,
+                       p.title, p.source, p.pub_year
+                FROM human_reviews r
+                LEFT JOIN papers p ON p.paper_key = r.paper_key
+                ORDER BY r.id DESC LIMIT 200
+                """
+            ).fetchall()
+            history = [dict(r) for r in rows]
+        return {
+            "pending": pending,
+            "history": history,
+            "presets": HUMAN_REVIEW_PRESETS,
+        }
+    finally:
+        conn.close()
+
+
+def submit_human_review(db_path: Path | str | None,
+                        payload: dict[str, Any]) -> dict[str, Any]:
+    """写入人工审核结果：支持预制动作或自定义 decision/rationale。"""
+    key = str(payload.get("paper_key") or "").strip()
+    if not key:
+        return {"ok": False, "error": "paper_key 为空"}
+    action = str(payload.get("action") or "custom").strip()
+    rationale = str(payload.get("rationale") or "").strip()
+    custom_result = payload.get("custom_result")
+    conn = _open(db_path)
+    try:
+        paper = get_paper(conn, key)
+        if not paper:
+            return {"ok": False, "error": f"文献不存在: {key}"}
+        preset = HUMAN_REVIEW_PRESETS.get(action)
+        if preset:
+            decision = preset["decision"]
+            needs_review = preset["needs_review"]
+            status = preset["status"]
+            action_label = preset["label"]
+        elif action == "custom":
+            decision = str(payload.get("decision") or "human").strip().lower()
+            if decision not in ("knowledge", "flagged", "enrich", "rejected", "human"):
+                decision = "human"
+            needs_review = bool(payload.get("needs_review", decision == "flagged"))
+            status = {
+                "knowledge": "ingested",
+                "flagged": "ingested",
+                "enrich": "needs_enrich",
+                "rejected": "rejected",
+                "human": "human_review",
+            }.get(decision, paper.get("status") or "human_review")
+            action_label = f"自定义: {decision}"
+        else:
+            return {"ok": False, "error": f"未知审核动作: {action}"}
+
+        q = get_quality_result(conn, key) or {
+            "paper_key": key,
+            "quality": None, "authority": None, "timeliness": None,
+        }
+        q.update({
+            "paper_key": key,
+            "decision": decision,
+            "needs_review": needs_review,
+            "rationale": rationale or q.get("rationale") or action_label,
+        })
+        save_quality_result(conn, q)
+        conn.execute("UPDATE papers SET status=? WHERE paper_key=?",
+                     (status, key))
+        custom_text = None
+        if custom_result is not None:
+            custom_text = custom_result if isinstance(custom_result, str) \
+                else json.dumps(custom_result, ensure_ascii=False)
+        conn.execute(
+            """
+            INSERT INTO human_reviews(
+                paper_key, action, decision, rationale, custom_result, reviewed_at
+            ) VALUES(?,?,?,?,?,?)
+            """,
+            (key, action, decision, rationale, custom_text, utcnow()),
+        )
+        log_event(conn, "human_review", "review-submitted", key, {
+            "action": action,
+            "action_label": action_label,
+            "decision": decision,
+            "status": status,
+            "rationale": rationale,
+        })
+        return {"ok": True, "paper_key": key, "decision": decision,
+                "status": status, "action": action}
     finally:
         conn.close()
 

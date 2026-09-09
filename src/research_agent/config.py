@@ -70,6 +70,10 @@ class Settings:
     q_flag_penalty: float = 0.85    # “标记后发送”的文献，质量权重折扣
     strong_edge_min_conf: float = 0.72  # 低于此阈值的强因果/调控边标记 candidate
 
+    # ---------- 质量控制：全局领域词典归并 ----------
+    global_merge_enabled: bool = True
+    global_merge_interval_nodes: int = 300
+
     # ---------- 知识提取·二次精修（v0.0.6） ----------
     knowledge_refine_enabled: bool = True      # 是否允许“低置信/泛化关系”二次精修
     refine_min_conf: float = 0.6               # 低于此置信度的实体/关系触发点名
@@ -137,6 +141,9 @@ class Settings:
         s.refine_max_items = int(os.getenv("RA_REFINE_MAX_ITEMS", s.refine_max_items))
         s.refine_max_attempts = int(
             os.getenv("RA_REFINE_MAX_ATTEMPTS", s.refine_max_attempts))
+        s.global_merge_enabled = _env_bool("RA_GLOBAL_MERGE", s.global_merge_enabled)
+        s.global_merge_interval_nodes = int(os.getenv(
+            "RA_GLOBAL_MERGE_INTERVAL_NODES", s.global_merge_interval_nodes))
         db = os.getenv("RA_DB_PATH")
         if db:
             s.db_path = Path(db)

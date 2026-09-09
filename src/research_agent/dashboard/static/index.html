@@ -16,6 +16,9 @@
       </div>
     </div>
     <div class="top-actions">
+      <label class="db-switch">数据库
+        <select id="dbSelect" title="切换动态本体数据库"></select>
+      </label>
       <label class="switch">
         <input type="checkbox" id="autoRefresh" checked />
         <span>自动刷新 6s</span>
@@ -42,6 +45,9 @@
         <button class="tab" data-tab="workflow" id="tabWorkflow">研究流程</button>
         <button class="tab active" data-tab="graph" id="tabGraph">本体图谱</button>
         <button class="tab" data-tab="papers" id="tabPapers">文献列表</button>
+        <button class="tab" data-tab="reviews" id="tabReviews">人工审核</button>
+        <button class="tab" data-tab="events" id="tabEvents">事件与日志</button>
+        <button class="tab" data-tab="planner" id="tabPlanner">规划指令</button>
       </nav>
 
       <section id="view-workflow" class="view hidden">
@@ -89,6 +95,49 @@
             <tbody id="paperTbody"></tbody>
           </table>
         </div>
+      </section>
+
+      <section id="view-reviews" class="view hidden">
+        <div class="review-toolbar">
+          <h3 class="section-title">待人工审核文献</h3>
+          <label class="switch review-switch">
+            <input type="checkbox" id="reviewHistoryToggle" />
+            <span>显示审核历史</span>
+          </label>
+          <span class="graph-stats" id="reviewCount"></span>
+        </div>
+        <div id="reviewList"></div>
+      </section>
+
+      <section id="view-events" class="view hidden">
+        <div class="event-toolbar">
+          <select id="eventNodeFilter">
+            <option value="">全部节点</option>
+            <option value="retrieval">检索</option>
+            <option value="quality">质量控制</option>
+            <option value="knowledge">知识提取</option>
+            <option value="study">研究流程</option>
+          </select>
+          <input type="search" id="eventSearch" placeholder="按论文 key / 日志内容搜索…" />
+          <button class="btn small" id="btnEventFilter">应用过滤</button>
+          <button class="btn small ghost" id="btnEventReset">重置</button>
+          <span class="graph-stats" id="eventCount"></span>
+        </div>
+        <div class="event-list" id="eventList"></div>
+      </section>
+
+      <section id="view-planner" class="view hidden">
+        <div class="planner-box">
+          <h3 class="section-title">工作规划节点交互</h3>
+          <p class="muted-text">输入研究需求后，可先生成任务单，或直接把指令后台发送给完整研究流程。</p>
+          <textarea id="plannerRequest" rows="5"
+            placeholder="示例：尝试提出一种炔酰胺合成多元氮杂化合物的新方法"></textarea>
+          <div class="planner-actions">
+            <button class="btn" id="btnPlannerPlan">发送给规划节点</button>
+            <button class="btn ghost" id="btnPlannerStudy">后台运行完整研究流程</button>
+          </div>
+        </div>
+        <div id="plannerResult" class="planner-result hidden"></div>
       </section>
     </main>
   </div>

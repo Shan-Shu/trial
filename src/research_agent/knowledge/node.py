@@ -29,6 +29,7 @@ from research_agent.ontology.store import (
     upsert_edge,
     upsert_node,
 )
+from research_agent.quality.control import maybe_global_merge
 
 logger = logging.getLogger(__name__)
 
@@ -335,9 +336,12 @@ def make_knowledge_node(model=None,
             }
             totals["new_types"] = sorted(after_types - before_types)
             record_ontology_run(db, key, totals, totals["new_types"])
+            control_stats = maybe_global_merge(db, settings)
             summary = graph_summary(db)
             report = {"preprocess": pre_stats, "extracted": totals,
-                      "ontology": summary}
+                      "ontology": summary,
+                      "quality_control": control_stats
+                      if control_stats.get("triggered") else None}
             log_event(db, "knowledge", "extracted", key, report)
             # 注意：不覆盖顶层 decision（knowledge/flagged 由质量节点给出）
             return {"extraction_report": report, "status": "extracted"}

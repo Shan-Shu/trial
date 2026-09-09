@@ -57,7 +57,7 @@ ROLE_KEY_ENV = {
 }
 ROLE_LABEL = {
     "retriever": "文献检索节点",
-    "quality": "质量评估节点",
+    "quality": "质量控制节点",
     "knowledge": "知识提取节点",
     "planner": "工作规划节点",
     "content": "内容形成节点",

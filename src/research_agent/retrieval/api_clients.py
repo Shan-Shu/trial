@@ -17,6 +17,7 @@ from research_agent.retrieval.extended import (
     SemanticScholarSearcher,
     UnpaywallClient,
 )
+from research_agent.retrieval.ncpssd import NcpssdClient
 from research_agent.retrieval.pubmed import PubMedClient
 
 logger = logging.getLogger(__name__)
@@ -365,6 +366,7 @@ SOURCE_SETS = {
     "europepmc": ["europepmc"],
     "semantic_scholar": ["semantic_scholar"],
     "openalex": ["openalex"],
+    "ncpssd": ["ncpssd"],
     "fulltext": ["europepmc", "arxiv", "semantic_scholar", "openalex"],
     "all": ["europepmc", "pubmed", "arxiv", "semantic_scholar", "openalex"],
 }
@@ -384,6 +386,7 @@ class ApiHub:
                  europepmc: EuropePmcClient | None = None,
                  semantic_scholar: SemanticScholarSearcher | None = None,
                  unpaywall: UnpaywallClient | None = None,
+                 ncpssd: NcpssdClient | None = None,
                  source: str = "fulltext") -> None:
         self.arxiv = arxiv or ArxivSearcher()
         self.openalex = openalex or OpenAlexClient()
@@ -392,6 +395,7 @@ class ApiHub:
         self.europepmc = europepmc or EuropePmcClient()
         self.semantic_scholar = semantic_scholar or SemanticScholarSearcher()
         self.unpaywall = unpaywall or UnpaywallClient()
+        self.ncpssd = ncpssd or NcpssdClient()
         self.source = source
 
     def search(self, query: str, max_results: int = 5,
@@ -414,6 +418,8 @@ class ApiHub:
             elif name == "openalex":
                 raw += self.openalex.search_publications(
                     query, per_page=max_results, open_access_only=True)
+            elif name == "ncpssd":
+                raw += self.ncpssd.search(query, max_results=max_results)
         uniq: list[dict] = []
         seen_keys: set[str] = set()
         seen_dois: set[str] = set()
@@ -430,6 +436,9 @@ class ApiHub:
                 break
         enriched: list[dict] = []
         for hit in uniq:
+            if source_set == ["ncpssd"]:
+                enriched.append(hit)
+                continue
             try:
                 enriched.append(self.enrich(hit))
             except Exception as exc:  # noqa: BLE001
@@ -458,6 +467,11 @@ class ApiHub:
     def download_pdf(self, rec: dict[str, Any]) -> bytes | None:
         """按候选地址依次尝试下载 PDF。"""
         candidates = []
+        if (rec.get("source") or "").lower() == "ncpssd":
+            logger.warning(
+                "NCPSSD current endpoint does not expose stable PDF full text; "
+                "using abstract fallback for %s", rec.get("paper_key"))
+            return None
         if rec.get("pdf_url"):
             candidates.append(rec["pdf_url"])
         if rec.get("pmcid"):
@@ -477,3 +491,15 @@ class ApiHub:
     def fulltext_text(self, pmcid: str) -> str | None:
         """Europe PMC OA 全文文本（任意来源有 PMCID 时的 XML 回退）。"""
         return self.pubmed.fetch_fulltext_text(pmcid)
+
+    def fetch_references(self, rec: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回一条记录的参考文献（引用溯源 skill backward 方向）。"""
+        if (rec.get("source") or "").lower() in ("ncpssd",):
+            return []
+        return self.europepmc.references(rec)
+
+    def fetch_citations(self, rec: dict[str, Any]) -> list[dict[str, Any]]:
+        """返回一条记录的引文（引用溯源 skill forward 方向）。"""
+        if (rec.get("source") or "").lower() in ("ncpssd",):
+            return []
+        return self.europepmc.citations(rec)
