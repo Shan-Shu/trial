@@ -21,4 +21,4 @@ research-agent（LangGraph 多模型科研辅助 Agent）本地提交版本索�
 | v0.1.1 | 2230cd7d56f15fb07d81f4bce318630ded07aa0f | P1 领域画像优化：工作规划生成 DomainProfile、检索不再内置生物医药维度、质量缺失数据不估计、知识抽取支持领域候选/冻结 schema |
 | v0.1.2 | 0ad8b9ea3ded37c063c7c731d24dd7d1e5ce1097 | 通用生成型任务支持：planner 识别 generative 任务、consumer 输出 design_context、content 生成候选 strategies、reviewer 增加创新充分性检查 |
 
-| v0.2.0 | a6f129c9cfc0f045ffdcbf105b5559a5b3fa1358 | 检索专项 skills（证据缺口/查询扩展/引用溯源）、质量控制与领域词典全局归并、多库看板与规划交互、人工审核界面、NCPSSD 中文社科语料接入 |
+| v0.2.0 | c49f11715e788ddf152f732355a6b14c52a35402 | 检索专项 skills（证据缺口/查询扩展/引用溯源）、质量控制与领域词典全局归并、多库看板与规划交互、人工审核界面、NCPSSD 中文社科语料接入 |
