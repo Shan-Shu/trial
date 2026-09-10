@@ -273,8 +273,8 @@ class RetrievalSkillsControlTest(unittest.TestCase):
         ont.init_ontology(conn)
         try:
             junk, _ = ont.upsert_node(
-                conn, node_type="Chemical", name="Compound 32",
-                aliases=["32"], confidence=0.8)
+                conn, node_type="Chemical", name="Compound 4aa",
+                aliases=["4aa"], confidence=0.8)
             useful, _ = ont.upsert_node(
                 conn, node_type="Chemical", name="Compound 33",
                 aliases=["(2E)-3-phenyl-N-(3,4,5-trichlorophenyl)prop-2-enamide"],
@@ -289,7 +289,7 @@ class RetrievalSkillsControlTest(unittest.TestCase):
                 (useful,)).fetchone()
             self.assertEqual(
                 row["name"], "(2E)-3-phenyl-N-(3,4,5-trichlorophenyl)prop-2-enamide")
-            self.assertIn("Compound 33", json.loads(row["aliases"]))
+            self.assertNotIn("Compound 33", json.loads(row["aliases"]))
         finally:
             conn.close()
             tmp.cleanup()

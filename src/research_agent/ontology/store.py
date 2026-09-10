@@ -1017,10 +1017,12 @@ def list_hyperedges(conn: sqlite3.Connection, *, limit: int = 500,
 
 
 _LOCAL_LABEL_RE = re.compile(
-    r'^\s*(?:compound|compd|product|intermediate|entry|item|stage|step|substrate|analyte)\s*[A-Za-z]?\d+[a-z]?\s*$',
+    r'^\s*(?:compound|compd|product|intermediate|entry|item|stage|step|substrate|analyte)'
+    r'\s*[A-Za-z]{0,4}\d+[A-Za-z]{0,4}\s*$',
     re.IGNORECASE,
 )
-_PURE_CODE_RE = re.compile(r'^\s*\(?[A-Za-z]?\d+[a-z]?\)?\s*$')
+_PURE_CODE_RE = re.compile(
+    r'^\s*\(?[A-Za-z]{0,4}\d+[A-Za-z]{0,4}\)?\s*$')
 
 _SEMANTIC_DOMAIN_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("ynamides", ("ynamide", "ynamides", "ynamide-", "ynamide")),
@@ -1069,6 +1071,27 @@ _DOMAIN_PARENT_BLACKLIST = {
 }
 
 
+
+_LOCAL_CODE_IN_TEXT_RE = re.compile(
+    r'\b(compound|compd|product|intermediate|entry|item|stage|step|substrate|analyte)'
+    r'\s*[A-Za-z]{0,4}\d+[A-Za-z]{0,4}\b',
+    re.IGNORECASE,
+)
+
+
+
+_GENERIC_LOCAL_BASES = {
+    "compound", "compd", "product", "intermediate", "entry", "item",
+    "stage", "step", "substrate", "analyte", "derivative", "analog",
+}
+
+
+def strip_local_reference_codes(name: str) -> str:
+    text = str(name or '').strip()
+    text = _LOCAL_CODE_IN_TEXT_RE.sub(lambda m: m.group(1), text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def is_local_reference_label(name: str) -> bool:
     n = str(name or "").strip()
     return bool(n and (_LOCAL_LABEL_RE.match(n) or _PURE_CODE_RE.match(n)))
@@ -1079,7 +1102,8 @@ def descriptive_alias(aliases: list[str]) -> str | None:
         a = str(alias or "").strip()
         if len(a) < 5 or is_local_reference_label(a):
             continue
-        stripped = re.sub(r'\s+[A-Za-z]?\d+[a-z]?$', '', a).strip()
+        stripped = re.sub(
+            r'\s+[A-Za-z]{0,4}\d+[A-Za-z]{0,4}$', '', a).strip()
         if len(stripped) >= 5 and not is_local_reference_label(stripped):
             return stripped
     return None
@@ -1153,6 +1177,33 @@ def cleanup_local_label_nodes(conn: sqlite3.Connection) -> dict[str, int]:
     ).fetchall()
     for row in rows:
         name = str(row["name"] or "").strip()
+        cleaned_name = strip_local_reference_codes(name)
+        if (cleaned_name != name and len(cleaned_name) >= 5
+                and cleaned_name.lower() not in _GENERIC_LOCAL_BASES
+                and not is_local_reference_label(cleaned_name)):
+            try:
+                aliases = json.loads(row["aliases"] or "[]")
+            except json.JSONDecodeError:
+                aliases = []
+            aliases = _merge_aliases(aliases, [name])
+            norm_clean = _norm(cleaned_name)
+            existing = conn.execute(
+                "SELECT node_id FROM ontology_nodes WHERE node_type=? "
+                "AND normalized_name=? AND node_id<>?",
+                (row["node_type"], norm_clean, int(row["node_id"])),
+            ).fetchone()
+            if existing:
+                _merge_nodes_simple(conn, int(existing["node_id"]),
+                                    int(row["node_id"]), f"{name} -> {cleaned_name}")
+                merged += 1
+            else:
+                conn.execute(
+                    "UPDATE ontology_nodes SET name=?, normalized_name=?, aliases=? WHERE node_id=?",
+                    (cleaned_name, norm_clean,
+                     json.dumps(aliases, ensure_ascii=False), int(row["node_id"])),
+                )
+                renamed += 1
+            continue
         if not is_local_reference_label(name):
             continue
         try:
@@ -1183,6 +1234,29 @@ def cleanup_local_label_nodes(conn: sqlite3.Connection) -> dict[str, int]:
                 (preferred, norm, json.dumps(extra_aliases, ensure_ascii=False), node_id),
             )
             renamed += 1
+    for node in conn.execute(
+            "SELECT node_id,name,aliases FROM ontology_nodes").fetchall():
+        try:
+            aliases = json.loads(node["aliases"] or "[]")
+        except json.JSONDecodeError:
+            aliases = []
+        cleaned_aliases = []
+        for alias in aliases:
+            a = str(alias or "").strip()
+            if not a or is_local_reference_label(a):
+                continue
+            stripped = strip_local_reference_codes(a)
+            if stripped.lower() in _GENERIC_LOCAL_BASES:
+                continue
+            a = stripped
+            if a and a != node["name"] and a not in cleaned_aliases:
+                cleaned_aliases.append(a)
+        if cleaned_aliases != aliases:
+            conn.execute(
+                "UPDATE ontology_nodes SET aliases=? WHERE node_id=?",
+                (json.dumps(cleaned_aliases, ensure_ascii=False),
+                 int(node["node_id"])),
+            )
     orphan_rows = conn.execute(
         "SELECT hyperedge_id FROM ontology_hyperedges h "
         "WHERE NOT EXISTS (SELECT 1 FROM ontology_hyperedge_members m "
