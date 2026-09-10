@@ -771,6 +771,7 @@ def ontology_graph(db_path: Path | str | None = None, *,
                    min_confidence: float = 0.0,
                    types: list[str] | None = None,
                    query: str | None = None,
+                   domain: str | None = None,
                    limit: int = 800) -> dict[str, Any]:
     """返回本体子图（节点+边）。默认返回全部；支持按类型/置信度/名称过滤。"""
     conn = _open(db_path)
@@ -791,6 +792,20 @@ def ontology_graph(db_path: Path | str | None = None, *,
             sql += " AND (name LIKE ? OR normalized_name LIKE ?)"
             like = f"%{query}%"
             params.extend([like, like])
+        if domain and _table(conn, "ontology_domain_members"):
+            domain_ids = [int(r["node_id"]) for r in conn.execute(
+                "SELECT m.node_id FROM ontology_domain_members m "
+                "JOIN ontology_domains d ON d.domain_key=m.domain_key "
+                "WHERE d.domain_key=? OR d.label=?", (domain, domain)).fetchall()]
+            if not domain_ids:
+                return {"nodes": [], "edges": [], "hyperedges": [], "domains": [],
+                        "channels": [], "truncated": False, "total": 0,
+                        "shown_nodes": 0, "shown_edges": 0,
+                        "shown_hyperedges": 0, "shown_domains": 0,
+                        "shown_channels": 0}
+            ph = ",".join("?" * len(domain_ids))
+            sql += f" AND node_id IN ({ph})"
+            params.extend(domain_ids)
         rows = conn.execute(sql, params).fetchall()
         total = len(rows)
         truncated = total > limit

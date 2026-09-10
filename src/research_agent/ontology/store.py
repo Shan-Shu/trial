@@ -1016,29 +1016,235 @@ def list_hyperedges(conn: sqlite3.Connection, *, limit: int = 500,
     return out
 
 
-def rebuild_ontology_views(conn: sqlite3.Connection) -> dict[str, Any]:
-    """重建域与关系通道（均为聚合视图，不创建新节点）。"""
-    conn.execute("DELETE FROM ontology_domain_members WHERE domain_key LIKE 'auto-type:%'")
-    conn.execute("DELETE FROM ontology_domains WHERE domain_key LIKE 'auto-type:%'")
-    node_rows = conn.execute(
-        "SELECT node_id, node_type, name, confidence FROM ontology_nodes"
+_LOCAL_LABEL_RE = re.compile(
+    r'^\s*(?:compound|compd|product|intermediate|entry|item|stage|step|substrate|analyte)\s*[A-Za-z]?\d+[a-z]?\s*$',
+    re.IGNORECASE,
+)
+_PURE_CODE_RE = re.compile(r'^\s*\(?[A-Za-z]?\d+[a-z]?\)?\s*$')
+
+_SEMANTIC_DOMAIN_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("ynamides", ("ynamide", "ynamides", "ynamide-", "ynamide")),
+    ("nitrogen heterocycles", (
+        "benzimidazole", "imidazole", "indole", "indazole", "pyridine",
+        "pyrimidine", "pyrazine", "pyridazine", "triazine", "triazole",
+        "pyrazole", "pyrrole", "quinoline", "isoquinoline", "diazepine",
+        "azepine", "piperazine", "oxazole", "thiazole", "azacycle",
+    )),
+    ("catalysis and catalysts", (
+        "catalyst", "catalysis", "catalytic", "palladium", "copper",
+        "gold", "rhodium", "nickel", "iridium", "cobalt", "scandium",
+    )),
+    ("disease and clinical outcomes", (
+        "disease", "syndrome", "cancer", "carcinoma", "infection",
+        "disorder", "clinical outcome",
+    )),
+    ("drugs and interventions", (
+        "drug", "inhibitor", "therapy", "treatment", "medication",
+        "intervention",
+    )),
+    ("proteins and genes", (
+        "protein", "gene", "kinase", "receptor", "enzyme", "transcription factor",
+    )),
+    ("materials and composites", (
+        "material", "polymer", "ceramic", "composite", "hydrogel",
+        "scaffold", "nanoparticle", "nanomaterial", "coating",
+    )),
+    ("machine learning methods", (
+        "neural network", "transformer", "algorithm", "classifier",
+        "large language model", "graph neural network",
+    )),
+    ("datasets and benchmarks", (
+        "dataset", "benchmark", "corpus", "evaluation suite",
+    )),
+    ("social institutions and policies", (
+        "institution", "policy", "government", "organization",
+        "population", "public administration",
+    )),
+]
+
+_DOMAIN_PARENT_BLACKLIST = {
+    "chemical", "chemicals", "compound", "compounds", "substance",
+    "material", "materials", "method", "methods", "concept", "entity",
+    "process", "thing", "item", "product", "products", "event",
+}
+
+
+def is_local_reference_label(name: str) -> bool:
+    n = str(name or "").strip()
+    return bool(n and (_LOCAL_LABEL_RE.match(n) or _PURE_CODE_RE.match(n)))
+
+
+def descriptive_alias(aliases: list[str]) -> str | None:
+    for alias in aliases or []:
+        a = str(alias or "").strip()
+        if len(a) < 5 or is_local_reference_label(a):
+            continue
+        stripped = re.sub(r'\s+[A-Za-z]?\d+[a-z]?$', '', a).strip()
+        if len(stripped) >= 5 and not is_local_reference_label(stripped):
+            return stripped
+    return None
+
+
+def _merge_nodes_simple(conn: sqlite3.Connection, keep_id: int,
+                        drop_id: int, reason: str) -> None:
+    if keep_id == drop_id:
+        return
+    rows = conn.execute(
+        "SELECT * FROM ontology_edges WHERE source_node=? OR target_node=?",
+        (drop_id, drop_id),
     ).fetchall()
-    domain_counts: dict[str, int] = {}
+    for row in rows:
+        src = keep_id if int(row["source_node"]) == drop_id else int(row["source_node"])
+        tgt = keep_id if int(row["target_node"]) == drop_id else int(row["target_node"])
+        if src == tgt:
+            continue
+        existing = conn.execute(
+            "SELECT edge_id, provenance, confidence FROM ontology_edges "
+            "WHERE relation_type=? AND source_node=? AND target_node=? AND edge_id<>?",
+            (row["relation_type"], src, tgt, row["edge_id"]),
+        ).fetchone()
+        if existing:
+            try:
+                old = json.loads(existing["provenance"] or "[]")
+                new = json.loads(row["provenance"] or "[]")
+            except json.JSONDecodeError:
+                old, new = [], []
+            conn.execute(
+                "UPDATE ontology_edges SET provenance=?, confidence=? WHERE edge_id=?",
+                (json.dumps(_dedup_provenance(old + new), ensure_ascii=False),
+                 max(float(existing["confidence"] or 0), float(row["confidence"] or 0)),
+                 int(existing["edge_id"])),
+            )
+            conn.execute("DELETE FROM ontology_edges WHERE edge_id=?", (int(row["edge_id"]),))
+        else:
+            conn.execute(
+                "UPDATE ontology_edges SET source_node=?, target_node=? WHERE edge_id=?",
+                (src, tgt, int(row["edge_id"])),
+            )
+    conn.execute(
+        "UPDATE OR IGNORE ontology_hyperedge_members SET node_id=? WHERE node_id=?",
+        (keep_id, drop_id),
+    )
+    conn.execute("DELETE FROM ontology_hyperedge_members WHERE node_id=?", (drop_id,))
+    for ev in conn.execute("SELECT id, entity_refs FROM event_assertions").fetchall():
+        refs = []
+        try:
+            refs = json.loads(ev["entity_refs"] or "[]")
+        except json.JSONDecodeError:
+            refs = []
+        out = []
+        for ref in refs:
+            val = keep_id if int(ref) == drop_id else int(ref)
+            if val not in out:
+                out.append(val)
+        if out != refs:
+            conn.execute("UPDATE event_assertions SET entity_refs=? WHERE id=?",
+                         (json.dumps(out), int(ev["id"])))
+    log_merge(conn, [drop_id], keep_id, rule_level="local_label",
+              reason=reason, operator="cleanup")
+    conn.execute("DELETE FROM ontology_nodes WHERE node_id=?", (drop_id,))
+
+
+def cleanup_local_label_nodes(conn: sqlite3.Connection) -> dict[str, int]:
+    """清理 Compound 32、5a、纯编号等论文内部临时标识节点。"""
+    renamed = merged = dropped = 0
+    rows = conn.execute(
+        "SELECT node_id,node_type,name,aliases FROM ontology_nodes ORDER BY node_id"
+    ).fetchall()
+    for row in rows:
+        name = str(row["name"] or "").strip()
+        if not is_local_reference_label(name):
+            continue
+        try:
+            aliases = json.loads(row["aliases"] or "[]")
+        except json.JSONDecodeError:
+            aliases = []
+        preferred = descriptive_alias(aliases)
+        node_id = int(row["node_id"])
+        if not preferred:
+            conn.execute("DELETE FROM ontology_edges WHERE source_node=? OR target_node=?", (node_id, node_id))
+            conn.execute("DELETE FROM ontology_hyperedge_members WHERE node_id=?", (node_id,))
+            conn.execute("DELETE FROM ontology_nodes WHERE node_id=?", (node_id,))
+            dropped += 1
+            continue
+        norm = _norm(preferred)
+        existing = conn.execute(
+            "SELECT node_id FROM ontology_nodes WHERE node_type=? AND normalized_name=? AND node_id<>?",
+            (row["node_type"], norm, node_id),
+        ).fetchone()
+        if existing:
+            _merge_nodes_simple(conn, int(existing["node_id"]), node_id,
+                                f"local label {name} -> {preferred}")
+            merged += 1
+        else:
+            extra_aliases = _merge_aliases(aliases, [name])
+            conn.execute(
+                "UPDATE ontology_nodes SET name=?, normalized_name=?, aliases=? WHERE node_id=?",
+                (preferred, norm, json.dumps(extra_aliases, ensure_ascii=False), node_id),
+            )
+            renamed += 1
+    conn.commit()
+    return {"renamed": renamed, "merged": merged, "dropped": dropped}
+
+
+def _hierarchy_parent_names(conn: sqlite3.Connection) -> dict[int, list[str]]:
+    out: dict[int, list[str]] = {}
+    rows = conn.execute(
+        "SELECT e.source_node, n.name FROM ontology_edges e "
+        "JOIN ontology_nodes n ON n.node_id=e.target_node "
+        "WHERE e.relation_type IN ('is_a','part_of')"
+    ).fetchall()
+    for r in rows:
+        name = str(r["name"] or "").strip()
+        if not name or is_local_reference_label(name) or name.lower() in _DOMAIN_PARENT_BLACKLIST:
+            continue
+        out.setdefault(int(r["source_node"]), []).append(name)
+    return out
+
+
+def _semantic_labels_for_node(name: str, aliases: list[str],
+                              parents: list[str]) -> set[str]:
+    text = " ".join([name] + aliases).lower()
+    labels = set(parents)
+    for domain, keywords in _SEMANTIC_DOMAIN_RULES:
+        if any(keyword in text for keyword in keywords):
+            labels.add(domain)
+    return labels
+
+
+def rebuild_ontology_views(conn: sqlite3.Connection) -> dict[str, Any]:
+    """重建语义节点域和关系通道；域是聚合视图，不是新节点。"""
+    conn.execute("DELETE FROM ontology_domain_members WHERE domain_key LIKE 'auto-%'")
+    conn.execute("DELETE FROM ontology_domains WHERE domain_key LIKE 'auto-%'")
+    parents = _hierarchy_parent_names(conn)
+    node_rows = conn.execute(
+        "SELECT node_id,node_type,name,aliases,confidence FROM ontology_nodes"
+    ).fetchall()
+    domains: dict[str, dict[str, Any]] = {}
     for r in node_rows:
-        node_type = str(r["node_type"])
-        key = f"auto-type:{node_type}"
-        domain_counts[key] = domain_counts.get(key, 0) + 1
+        try:
+            aliases = json.loads(r["aliases"] or "[]")
+        except json.JSONDecodeError:
+            aliases = []
+        labels = _semantic_labels_for_node(
+            str(r["name"] or ""), aliases, parents.get(int(r["node_id"]), []))
+        for label in labels:
+            key = "auto-semantic:" + hashlib.sha1(label.encode("utf-8")).hexdigest()[:20]
+            d = domains.setdefault(key, {"label": label, "members": []})
+            d["members"].append((int(r["node_id"]), float(r["confidence"] or 0.5)))
+    for key, d in domains.items():
         conn.execute(
-            "INSERT OR IGNORE INTO ontology_domains(domain_key,label,domain_type,description,attributes) "
+            "INSERT INTO ontology_domains(domain_key,label,domain_type,description,attributes) "
             "VALUES(?,?,?,?,?)",
-            (key, node_type, "auto_entity_type",
-             f"{node_type} 类型的实体集合", "{}"),
+            (key, d["label"], "semantic_cluster",
+             f"语义相近实体域：{d['label']}", "{}"),
         )
-        conn.execute(
-            "INSERT OR IGNORE INTO ontology_domain_members(domain_key,node_id,weight,confidence) "
-            "VALUES(?,?,?,?)",
-            (key, int(r["node_id"]), 1.0, float(r["confidence"] or 0.5)),
-        )
+        for node_id, confidence in d["members"]:
+            conn.execute(
+                "INSERT OR IGNORE INTO ontology_domain_members(domain_key,node_id,weight,confidence) "
+                "VALUES(?,?,?,?)",
+                (key, node_id, 1.0, confidence),
+            )
     edges = list_hyperedges(conn, limit=100000, min_confidence=0.0)
     conn.execute("DELETE FROM ontology_channel_hyperedges WHERE channel_key LIKE 'auto:%'")
     conn.execute("DELETE FROM ontology_relation_channels WHERE channel_key LIKE 'auto:%'")
@@ -1088,12 +1294,11 @@ def rebuild_ontology_views(conn: sqlite3.Connection) -> dict[str, Any]:
             )
     conn.commit()
     return {
-        "domains": len(domain_counts),
-        "domain_members": sum(domain_counts.values()),
+        "domains": len(domains),
+        "domain_members": sum(len(d["members"]) for d in domains.values()),
         "channels": len(channels),
         "hyperedges": len(edges),
     }
-
 
 
 def backfill_hyperedges_from_legacy(conn: sqlite3.Connection) -> dict[str, int]:

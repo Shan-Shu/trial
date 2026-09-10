@@ -9,6 +9,7 @@ const state = {
   selectedTypes: new Set(),
   minConf: 0,
   graphLoading: false,
+  domain: "",
 };
 
 /* ---------- 工具 ---------- */
@@ -365,6 +366,7 @@ async function loadGraph(keepView = false) {
     if (state.minConf > 0) params.set("min_confidence", state.minConf);
     const q = $("#qSearch").value.trim();
     if (q) params.set("q", q);
+    if (state.domain) params.set("domain", state.domain);
     const data = await api("/api/ontology?" + params.toString());
     drawGraph(data, keepView);
   } catch (err) {
@@ -424,7 +426,7 @@ function renderStructure(data) {
     <div class="struct-block">
       <h4>节点域</h4>
       <div class="struct-chips">${domains.map((d) => `
-        <button class="struct-chip domain-chip" data-domain-type="${esc(d.label || "")}">
+        <button class="struct-chip domain-chip" data-domain-key="${esc(d.domain_key || "")}">
           <b>${esc(d.label || d.domain_key)}</b><span>${esc(d.member_count || 0)} 节点</span>
         </button>`).join("") || '<span class="muted">暂无域</span>'}</div>
     </div>
@@ -446,10 +448,8 @@ function renderStructure(data) {
     </div>`;
   [...panel.querySelectorAll(".domain-chip")].forEach((btn) => {
     btn.onclick = () => {
-      const t = btn.dataset.domainType;
-      if (!t) return;
+      state.domain = btn.dataset.domainKey || "";
       state.selectedTypes.clear();
-      state.selectedTypes.add(t);
       renderTypeFilters(state.nodeTypes);
       loadGraph();
     };
@@ -892,6 +892,7 @@ function bind() {
   $("#btnApplyGraph").onclick = () => { state.minConf = parseFloat($("#minConf").value); loadGraph(); };
   $("#btnResetGraph").onclick = () => {
     state.selectedTypes.clear();
+    state.domain = "";
     state.minConf = 0;
     $("#minConf").value = 0;
     $("#minConfVal").textContent = "0";

@@ -219,12 +219,12 @@ class RetrievalSkillsControlTest(unittest.TestCase):
         conn = connect(path)
         ont.init_ontology(conn)
         try:
-            a, _ = ont.upsert_node(conn, node_type="Chemical", name="A",
-                                   confidence=0.9)
+            a, _ = ont.upsert_node(conn, node_type="Chemical",
+                                   name="N-allyl-ynamide", confidence=0.9)
             pd, _ = ont.upsert_node(conn, node_type="Catalyst", name="Pd",
                                     confidence=0.9)
-            b, _ = ont.upsert_node(conn, node_type="Chemical", name="B",
-                                   confidence=0.9)
+            b, _ = ont.upsert_node(conn, node_type="Chemical",
+                                   name="Benzimidazole", confidence=0.9)
             edge_id, is_new = ont.upsert_hyperedge(
                 conn, hyperedge_type="reaction", label="A to B",
                 members=[
@@ -251,6 +251,45 @@ class RetrievalSkillsControlTest(unittest.TestCase):
             views = ont.rebuild_ontology_views(conn)
             self.assertGreaterEqual(views["domains"], 2)
             self.assertGreaterEqual(views["channels"], 1)
+            labels_a = {r["label"] for r in conn.execute(
+                "SELECT d.label FROM ontology_domain_members m "
+                "JOIN ontology_domains d ON d.domain_key=m.domain_key "
+                "WHERE m.node_id=?", (a,)).fetchall()}
+            labels_b = {r["label"] for r in conn.execute(
+                "SELECT d.label FROM ontology_domain_members m "
+                "JOIN ontology_domains d ON d.domain_key=m.domain_key "
+                "WHERE m.node_id=?", (b,)).fetchall()}
+            self.assertIn("ynamides", labels_a)
+            self.assertIn("nitrogen heterocycles", labels_b)
+            self.assertNotEqual(labels_a, labels_b)
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+    def test_cleanup_local_reference_labels_and_rename_with_alias(self):
+        tmp = tempfile.TemporaryDirectory()
+        path = Path(tmp.name) / "labels.db"
+        conn = connect(path)
+        ont.init_ontology(conn)
+        try:
+            junk, _ = ont.upsert_node(
+                conn, node_type="Chemical", name="Compound 32",
+                aliases=["32"], confidence=0.8)
+            useful, _ = ont.upsert_node(
+                conn, node_type="Chemical", name="Compound 33",
+                aliases=["(2E)-3-phenyl-N-(3,4,5-trichlorophenyl)prop-2-enamide"],
+                confidence=0.8)
+            stats = ont.cleanup_local_label_nodes(conn)
+            self.assertGreaterEqual(stats["dropped"], 1)
+            self.assertGreaterEqual(stats["renamed"], 1)
+            self.assertIsNone(conn.execute(
+                "SELECT 1 FROM ontology_nodes WHERE node_id=?", (junk,)).fetchone())
+            row = conn.execute(
+                "SELECT name,aliases FROM ontology_nodes WHERE node_id=?",
+                (useful,)).fetchone()
+            self.assertEqual(
+                row["name"], "(2E)-3-phenyl-N-(3,4,5-trichlorophenyl)prop-2-enamide")
+            self.assertIn("Compound 33", json.loads(row["aliases"]))
         finally:
             conn.close()
             tmp.cleanup()

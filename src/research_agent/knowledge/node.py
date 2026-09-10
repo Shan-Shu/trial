@@ -25,6 +25,9 @@ from research_agent.ontology.store import (
     graph_summary,
     init_ontology,
     record_ontology_run,
+    cleanup_local_label_nodes,
+    descriptive_alias,
+    is_local_reference_label,
     rebuild_ontology_views,
     register_material,
     upsert_edge,
@@ -144,6 +147,15 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         if is_reporting_phrase(name):
             stats["dropped_garbage"] += 1
             continue
+        aliases = [str(a) for a in (e.get("aliases") or []) if str(a).strip()]
+        if is_local_reference_label(name):
+            preferred = descriptive_alias(aliases)
+            if not preferred:
+                stats["dropped_garbage"] += 1
+                continue
+            if name not in aliases:
+                aliases.append(name)
+            name = preferred
         ntype = str(e.get("type") or "Concept").strip() or "Concept"
         model_conf = e.get("confidence")
         try:
@@ -151,7 +163,6 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         except (TypeError, ValueError):
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
-        aliases = [str(a) for a in (e.get("aliases") or []) if str(a).strip()]
         attrs = _clean_attrs(e.get("attributes"))
         prov = [{"paper": paper_key, "evidence": str(e.get("evidence") or "")[:500]}]
         node_id, is_new = upsert_node(
@@ -433,13 +444,15 @@ def make_knowledge_node(model=None,
             totals["new_types"] = sorted(after_types - before_types)
             record_ontology_run(db, key, totals, totals["new_types"])
             control_stats = maybe_global_merge(db, settings)
+            cleanup_stats = cleanup_local_label_nodes(db)
             view_stats = rebuild_ontology_views(db)
             summary = graph_summary(db)
             report = {"preprocess": pre_stats, "extracted": totals,
                       "ontology": summary,
                       "quality_control": control_stats
                       if control_stats.get("triggered") else None,
-                      "ontology_views": view_stats}
+                      "ontology_views": view_stats,
+                      "local_label_cleanup": cleanup_stats}
             log_event(db, "knowledge", "extracted", key, report)
             # 注意：不覆盖顶层 decision（knowledge/flagged 由质量节点给出）
             return {"extraction_report": report, "status": "extracted"}

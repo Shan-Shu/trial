@@ -147,6 +147,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         min_confidence: float = Query(0.0, ge=0.0, le=1.0),
         types: Optional[str] = Query(None, description="逗号分隔的节点类型"),
         q: Optional[str] = Query(None, description="名称搜索"),
+        domain: Optional[str] = Query(None, description="语义节点域 key 或名称"),
         limit: int = Query(800, ge=1, le=5000),
         request: Request = None,
     ) -> dict:
@@ -154,7 +155,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         return dbapi.ontology_graph(
             request.app.state.db_path,
             min_confidence=min_confidence, types=type_list,
-            query=q, limit=limit,
+            query=q, domain=domain, limit=limit,
         )
 
     @app.get("/api/ontology/nodes/{node_id}")
