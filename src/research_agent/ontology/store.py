@@ -1183,8 +1183,22 @@ def cleanup_local_label_nodes(conn: sqlite3.Connection) -> dict[str, int]:
                 (preferred, norm, json.dumps(extra_aliases, ensure_ascii=False), node_id),
             )
             renamed += 1
+    orphan_rows = conn.execute(
+        "SELECT hyperedge_id FROM ontology_hyperedges h "
+        "WHERE NOT EXISTS (SELECT 1 FROM ontology_hyperedge_members m "
+        "WHERE m.hyperedge_id=h.hyperedge_id)"
+    ).fetchall()
+    orphan_ids = [int(r["hyperedge_id"]) for r in orphan_rows]
+    for hyperedge_id in orphan_ids:
+        for table in ("ontology_hyperedge_members", "ontology_hyperedge_conditions",
+                      "ontology_hyperedge_measurements", "ontology_hyperedge_evidence",
+                      "ontology_hyperedge_cluster_members", "ontology_channel_hyperedges"):
+            conn.execute(f"DELETE FROM {table} WHERE hyperedge_id=?", (hyperedge_id,))
+        conn.execute("DELETE FROM ontology_hyperedges WHERE hyperedge_id=?",
+                     (hyperedge_id,))
     conn.commit()
-    return {"renamed": renamed, "merged": merged, "dropped": dropped}
+    return {"renamed": renamed, "merged": merged, "dropped": dropped,
+            "dropped_hyperedges": len(orphan_ids)}
 
 
 def _hierarchy_parent_names(conn: sqlite3.Connection) -> dict[int, list[str]]:
