@@ -14,4 +14,4 @@
 | reference-tracing | 检索层：引用溯源 | `retrieval/skills.py::trace_references` |
 | quality-control | 质量控制：原质量评估 + 领域词典全局归并 | `quality/control.py::maybe_global_merge` |
 
-当前版本：v0.3.0（提示词改动请同步更新代码常量，本目录为说明副本）。
+当前版本：v0.3.1（提示词改动请同步更新代码常量，本目录为说明副本）。
