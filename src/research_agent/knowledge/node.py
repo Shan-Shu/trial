@@ -25,8 +25,10 @@ from research_agent.ontology.store import (
     graph_summary,
     init_ontology,
     record_ontology_run,
+    rebuild_ontology_views,
     register_material,
     upsert_edge,
+    upsert_hyperedge,
     upsert_node,
 )
 from research_agent.quality.control import maybe_global_merge
@@ -129,8 +131,8 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                       evidence_tier: str | None = None) -> dict[str, Any]:
     """把一次抽取结果写入本体，返回统计（新增节点/边/类型）。"""
     stats = {"entities": 0, "relations": 0, "events": 0,
-             "new_nodes": 0, "new_edges": 0, "new_types": [],
-             "dropped_garbage": 0}
+             "hyperedges": 0, "new_nodes": 0, "new_edges": 0,
+             "new_hyperedges": 0, "new_types": [], "dropped_garbage": 0}
     name_to_id: dict[tuple[str, str], int] = {}
 
     for e in data.get("entities") or []:
@@ -240,6 +242,97 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             provenance=prov,
         )
         stats["events"] += 1
+
+    explicit_hyperedges = [x for x in (data.get("hyperedges") or [])
+                           if isinstance(x, dict)]
+    hyperedge_payloads: list[dict[str, Any]] = []
+    if explicit_hyperedges:
+        hyperedge_payloads.extend(explicit_hyperedges)
+    else:
+        # Compatibility adapter: old relation/event output is projected into hyperedges
+        # without creating Reaction/Event nodes.
+        for r in data.get("relations") or []:
+            if not isinstance(r, dict):
+                continue
+            hyperedge_payloads.append({
+                "type": "relation",
+                "label": str(r.get("predicate") or r.get("type") or "relation"),
+                "members": [
+                    {"name": r.get("subject"), "role": "subject"},
+                    {"name": r.get("object"), "role": "object"},
+                ],
+                "confidence": r.get("confidence", 0.5),
+                "evidence": r.get("evidence"),
+                "attributes": {"relation_type": r.get("type")},
+            })
+        for ev in data.get("events") or []:
+            if not isinstance(ev, dict):
+                continue
+            hyperedge_payloads.append({
+                "type": "event",
+                "label": str(ev.get("trigger") or "event"),
+                "members": [
+                    {"name": name, "role": "participant"}
+                    for name in (ev.get("participants") or [])
+                ],
+                "conditions": ({"time": ev.get("time")}
+                               if ev.get("time") is not None else {}),
+                "confidence": ev.get("confidence", 0.5),
+                "evidence": ev.get("evidence"),
+                "attributes": ev.get("attributes") or {},
+            })
+
+    for h in hyperedge_payloads:
+        htype = str(h.get("hyperedge_type") or h.get("type") or "claim").strip()
+        label = str(h.get("label") or htype).strip()
+        raw_members = h.get("members") or []
+        members = []
+        for member in raw_members:
+            if isinstance(member, str):
+                member = {"name": member, "role": "participant"}
+            if not isinstance(member, dict):
+                continue
+            node_id = _resolve(str(member.get("name") or member.get("node_id") or ""))
+            if node_id is None and member.get("node_id") is not None:
+                try:
+                    node_id = int(member["node_id"])
+                except (TypeError, ValueError):
+                    node_id = None
+            if node_id is None:
+                continue
+            members.append({
+                "node_id": node_id,
+                "name": member.get("name") or "",
+                "role": member.get("role") or "participant",
+                "position": member.get("position"),
+                "qualifiers": _clean_attrs(member.get("qualifiers") or {}),
+            })
+        try:
+            model_conf = float(h.get("confidence") or 0.5)
+        except (TypeError, ValueError):
+            model_conf = 0.5
+        conf = blend_confidence(model_conf, quality_q, flagged, settings)
+        evidence_value = h.get("evidence")
+        if isinstance(evidence_value, list):
+            evidence_items = [e for e in evidence_value if isinstance(e, dict)]
+        else:
+            evidence_items = [{"paper": paper_key,
+                               "evidence": str(evidence_value or "")[:500]}]
+        _, is_new = upsert_hyperedge(
+            conn,
+            hyperedge_type=htype,
+            label=label,
+            members=members,
+            conditions=h.get("conditions") or {},
+            measurements=h.get("measurements") or [],
+            confidence=conf,
+            evidence_tier=evidence_tier,
+            paper_key=paper_key,
+            provenance=evidence_items,
+            attributes=_clean_attrs(h.get("attributes") or {}),
+        )
+        stats["hyperedges"] += 1
+        stats["new_hyperedges"] += int(is_new)
     return stats
 
 
@@ -279,7 +372,9 @@ def make_knowledge_node(model=None,
                 "chunks": len(chunks),
             }
             totals: dict[str, Any] = {"entities": 0, "relations": 0, "events": 0,
-                                      "new_nodes": 0, "new_edges": 0, "new_types": [],
+                                      "hyperedges": 0, "new_nodes": 0,
+                                      "new_edges": 0, "new_hyperedges": 0,
+                                      "new_types": [],
                                       "dropped_garbage": 0,
                                       "refine_runs": 0, "refine_issues": 0,
                                       "refine_attempts": 0, "refine_failed": 0}
@@ -321,8 +416,9 @@ def make_knowledge_node(model=None,
                     db, data, quality_q=quality_q, flagged=flagged,
                     paper_key=key, settings=settings, evidence_tier=tier,
                 )
-                for k in ("entities", "relations", "events", "new_nodes",
-                          "new_edges", "dropped_garbage"):
+                for k in ("entities", "relations", "events", "hyperedges",
+                          "new_nodes", "new_edges", "new_hyperedges",
+                          "dropped_garbage"):
                     totals[k] += chunk_stats[k]
                 if refine_stats.get("attempts"):
                     totals["refine_runs"] += 1
@@ -337,11 +433,13 @@ def make_knowledge_node(model=None,
             totals["new_types"] = sorted(after_types - before_types)
             record_ontology_run(db, key, totals, totals["new_types"])
             control_stats = maybe_global_merge(db, settings)
+            view_stats = rebuild_ontology_views(db)
             summary = graph_summary(db)
             report = {"preprocess": pre_stats, "extracted": totals,
                       "ontology": summary,
                       "quality_control": control_stats
-                      if control_stats.get("triggered") else None}
+                      if control_stats.get("triggered") else None,
+                      "ontology_views": view_stats}
             log_event(db, "knowledge", "extracted", key, report)
             # 注意：不覆盖顶层 decision（knowledge/flagged 由质量节点给出）
             return {"extraction_report": report, "status": "extracted"}

@@ -66,6 +66,23 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
       "confidence": 0.0,
       "evidence": "支撑原句（可截断，≤300字符）"
     }
+  ],
+  "hyperedges": [
+    {
+      "type": "observation|claim|procedure|causal_relation|comparison|definition|chronology|argument",
+      "label": "该超边的简短名称；不要创建 Reaction/Event 节点",
+      "members": [
+        {"name": "entities 中的实体名", "role": "跨学科通用角色或领域角色", "qualifiers": {}}
+      ],
+      "conditions": [
+        {"key": "temperature|duration|dose|setting|period|location|...", "operator": "=|>|<|between|described_as", "value": "值", "unit": "单位或 null"}
+      ],
+      "measurements": [
+        {"metric": "yield|effect_size|p_value|accuracy|frequency|...", "value": "值", "unit": "单位或 null", "qualifier": "可选"}
+      ],
+      "confidence": 0.0,
+      "evidence": "支撑原句（可截断，≤300字符）"
+    }
   ]
 }
 
@@ -73,6 +90,10 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
 Method, Material, Device, Drug, Disease, Model, Metric, Dataset, Task, Theory,
 Parameter, Property, Application, Organism, CellLine, Chemical, Target,
 BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Researcher
+
+超边通用角色建议：agent, patient, target, instrument, medium, context,
+moderator, mediator, outcome, comparison, location, time, evidence。
+领域可用更精确角色，但角色只存在于超边成员中，不要把角色本身建成实体节点。
 
 硬性要求：
 1. 连通性：每条 relation 的 subject 和 object，以及每个 event 的 participants，
@@ -339,6 +360,7 @@ def parse_model_json(raw: str) -> dict[str, Any]:
     data.setdefault("entities", [])
     data.setdefault("relations", [])
     data.setdefault("events", [])
+    data.setdefault("hyperedges", [])
     return data
 
 

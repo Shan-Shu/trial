@@ -27,11 +27,11 @@ CONTENT_PROMPT = """你是科研内容形成节点。工作方式是“先看证
 
 输入材料：
 1. 研究任务单 task_plan；
-2. 知识消费节点返回的模式卡 patterns 与证据卡 evidence。
+2. 知识消费节点返回的模式卡 patterns、证据卡 evidence 与科研超边 hyperedges。
 
 要求：
 1. 从 patterns 中观察高支持度、高置信度、同关系聚合的模式，再归纳章节和论点；
-2. 每条实质性论点必须引用真实存在的 pattern_id / evidence_id；
+2. 每条实质性论点必须引用真实存在的 pattern_id / evidence_id / hyperedge_id；
 3. 无法被证据支撑但值得提出的内容标为 status="open_question"，不要伪造证据；
 4. 不要把 correlation 写成 causality；
 5. 只输出 JSON 对象，不要代码块、不要解释。
@@ -316,6 +316,7 @@ def _compact_knowledge(knowledge: dict[str, Any],
         "corpus": knowledge.get("corpus") or {},
         "patterns": patterns[:max_patterns],
         "evidence": evidence[:max_evidence],
+        "hyperedges": (knowledge.get("hyperedges") or [])[:40],
         "coverage_score": knowledge.get("coverage_score", 0),
         "design_context": design_context,
     }

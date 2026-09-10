@@ -22,3 +22,5 @@ research-agent（LangGraph 多模型科研辅助 Agent）本地提交版本索�
 | v0.1.2 | 0ad8b9ea3ded37c063c7c731d24dd7d1e5ce1097 | 通用生成型任务支持：planner 识别 generative 任务、consumer 输出 design_context、content 生成候选 strategies、reviewer 增加创新充分性检查 |
 
 | v0.2.0 | c49f11715e788ddf152f732355a6b14c52a35402 | 检索专项 skills（证据缺口/查询扩展/引用溯源）、质量控制与领域词典全局归并、多库看板与规划交互、人工审核界面、NCPSSD 中文社科语料接入 |
+
+| v0.3.0 | 待登记（后续 docs 提交） | 审核节点 4:1 双维度与正确性硬门槛、科研超边本体、节点域/关系通道、可视化超边面板 |

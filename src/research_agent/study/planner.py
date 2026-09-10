@@ -95,6 +95,18 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
     "relevance_gate": "strict",
     "reference_direction": "both"
   }},
+  "instruction_contract": {{
+    "task_kind": "summary|generative|frontier|evaluation|proof",
+    "deliverable_format": "markdown|docx|pdf|text",
+    "language": "zh",
+    "required_method_count": 0,
+    "required_sections": [],
+    "must_include": [],
+    "must_exclude": [],
+    "reference_style": "ACS|numeric|none",
+    "evidence_policy": "每条实质断言可溯源",
+    "correctness_threshold": 0.85
+  }},
   "deliverable": {{
     "format": "markdown",
     "sections_policy": "emergent",
@@ -107,6 +119,57 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
 
 注意：creative_contract 必须用领域无关语言描述“生成什么、如何生成、如何评价”，
 domain_profile 才用来实例化领域词汇。"""
+
+
+
+
+def infer_deliverable_format(request: str) -> str:
+    text = (request or "").lower()
+    if "docx" in text or "word" in text or "文档" in text:
+        return "docx"
+    if "pdf" in text:
+        return "pdf"
+    if "markdown" in text or "md" in text:
+        return "markdown"
+    return "markdown"
+
+
+def normalize_instruction_contract(
+        data: dict[str, Any] | None, request: str, task_kind: str,
+        creative_contract: dict[str, Any] | None = None,
+        deliverable: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = data or {}
+    deliverable = deliverable or {}
+    creative_contract = creative_contract or {}
+    required_count = raw.get("required_method_count")
+    if required_count is None and task_kind == "generative":
+        required_count = creative_contract.get("min_candidates") or 0
+    try:
+        required_count = max(0, int(required_count or 0))
+    except (TypeError, ValueError):
+        required_count = 0
+    reference_style = clean_str(raw.get("reference_style"), "")
+    if not reference_style and "acs" in request.lower():
+        reference_style = "ACS"
+    threshold = raw.get("correctness_threshold", 0.85)
+    try:
+        threshold = min(1.0, max(0.0, float(threshold)))
+    except (TypeError, ValueError):
+        threshold = 0.85
+    return {
+        "task_kind": clean_str(raw.get("task_kind"), task_kind),
+        "deliverable_format": clean_str(
+            raw.get("deliverable_format"),
+            deliverable.get("format") or infer_deliverable_format(request)),
+        "language": clean_str(raw.get("language"), deliverable.get("language") or "zh"),
+        "required_method_count": required_count,
+        "required_sections": [str(x) for x in raw.get("required_sections") or [] if str(x).strip()],
+        "must_include": [str(x) for x in raw.get("must_include") or [] if str(x).strip()],
+        "must_exclude": [str(x) for x in raw.get("must_exclude") or [] if str(x).strip()],
+        "reference_style": reference_style,
+        "evidence_policy": clean_str(raw.get("evidence_policy"), "每条实质断言可溯源"),
+        "correctness_threshold": threshold,
+    }
 
 
 def infer_content_type(request: str) -> str:
@@ -221,6 +284,14 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
     if task_kind == "generative":
         creative_contract = normalize_creative_contract(
             raw.get("creative_contract"), request, domain)
+    deliverable_out = {
+        "format": clean_str(deliverable.get("format"), "markdown"),
+        "sections_policy": "emergent",
+        "language": clean_str(deliverable.get("language"), "zh"),
+    }
+    instruction_contract = normalize_instruction_contract(
+        raw.get("instruction_contract"), request, task_kind,
+        creative_contract, deliverable_out)
     return {
         "goal": goal,
         "domain": domain,
@@ -232,11 +303,8 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
         "analysis_targets": analysis,
         "mission": mission,
         "retrieval": retrieval,
-        "deliverable": {
-            "format": clean_str(deliverable.get("format"), "markdown"),
-            "sections_policy": "emergent",
-            "language": clean_str(deliverable.get("language"), "zh"),
-        },
+        "instruction_contract": instruction_contract,
+        "deliverable": deliverable_out,
         "constraints": raw.get("constraints") or [],
     }
 

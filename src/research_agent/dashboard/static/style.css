@@ -248,6 +248,34 @@ pre.clean {
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-mini { background: var(--panel2); border: 1px solid var(--border); border-radius: 20px; padding: 1px 10px; font-size: 12px; }
 
+
+/* ---------- 节点域/通道/超边结构面板 ---------- */
+.structure-panel {
+  display: grid; grid-template-columns: 1fr 1.2fr 1.2fr; gap: 10px;
+  margin-top: 10px;
+}
+.struct-block {
+  background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 10px; min-width: 0;
+}
+.struct-block h4 { margin: 0 0 7px; color: var(--muted); font-size: 13px; }
+.struct-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.struct-chip {
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  border-radius: 7px; padding: 5px 8px; cursor: pointer; display: flex;
+  flex-direction: column; align-items: flex-start; gap: 2px;
+}
+.struct-chip:hover { border-color: var(--accent); }
+.struct-chip span { color: var(--muted); font-size: 11px; }
+.struct-list { max-height: 210px; overflow: auto; }
+.struct-row {
+  display: grid; grid-template-columns: minmax(100px, 0.8fr) 1.4fr 0.8fr;
+  gap: 7px; border-bottom: 1px dashed var(--border); padding: 5px 0;
+  font-size: 12px; align-items: start;
+}
+.struct-row:last-child { border-bottom: none; }
+.struct-row span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- 研究流程监控 ---------- */
 .section-title { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
 .study-banner {
@@ -348,6 +376,7 @@ pre.clean {
 .review-rationale { width: 100%; resize: vertical; }
 .review-submit-row { display: flex; justify-content: flex-end; margin-top: 8px; }
 @media (max-width: 1100px) {
+  .structure-panel { grid-template-columns: 1fr; }
   .flow-grid { grid-template-columns: repeat(2, 1fr); }
   .flow-cols { grid-template-columns: 1fr; }
 }

@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -235,6 +236,149 @@ CREATE TABLE IF NOT EXISTS direction_queue (
     status          TEXT DEFAULT 'open',
     created_at      TEXT
 );
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedges (
+    hyperedge_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    hyperedge_type  TEXT NOT NULL,
+    fingerprint     TEXT UNIQUE,
+    label           TEXT,
+    attributes      TEXT DEFAULT '{}',
+    confidence      REAL DEFAULT 0.5,
+    evidence_tier   TEXT DEFAULT 'unclassified',
+    paper_key       TEXT,
+    created_at      TEXT,
+    provenance      TEXT DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_hyperedges_type
+    ON ontology_hyperedges(hyperedge_type);
+CREATE INDEX IF NOT EXISTS idx_hyperedges_paper
+    ON ontology_hyperedges(paper_key);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_members (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hyperedge_id    INTEGER NOT NULL,
+    node_id         INTEGER NOT NULL,
+    role            TEXT,
+    position        INTEGER DEFAULT 0,
+    qualifiers      TEXT DEFAULT '{}',
+    UNIQUE(hyperedge_id, node_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_hyperedge_members_edge
+    ON ontology_hyperedge_members(hyperedge_id);
+CREATE INDEX IF NOT EXISTS idx_hyperedge_members_node
+    ON ontology_hyperedge_members(node_id);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_conditions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hyperedge_id    INTEGER NOT NULL,
+    condition_key   TEXT,
+    operator        TEXT,
+    value_text      TEXT,
+    value_num       REAL,
+    unit            TEXT,
+    qualifier       TEXT,
+    UNIQUE(hyperedge_id, condition_key, value_text, unit)
+);
+CREATE INDEX IF NOT EXISTS idx_hyperedge_conditions_edge
+    ON ontology_hyperedge_conditions(hyperedge_id);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_measurements (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hyperedge_id    INTEGER NOT NULL,
+    metric          TEXT,
+    value_text      TEXT,
+    value_num       REAL,
+    unit            TEXT,
+    qualifier       TEXT,
+    subject_node    INTEGER,
+    UNIQUE(hyperedge_id, metric, value_text, unit, subject_node)
+);
+CREATE INDEX IF NOT EXISTS idx_hyperedge_measurements_edge
+    ON ontology_hyperedge_measurements(hyperedge_id);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_evidence (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hyperedge_id    INTEGER NOT NULL,
+    paper_key       TEXT,
+    section         TEXT,
+    span_text       TEXT,
+    char_start      INTEGER,
+    char_end        INTEGER,
+    UNIQUE(hyperedge_id, paper_key, span_text, char_start, char_end)
+);
+CREATE INDEX IF NOT EXISTS idx_hyperedge_evidence_edge
+    ON ontology_hyperedge_evidence(hyperedge_id);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_links (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_hyperedge  INTEGER NOT NULL,
+    to_hyperedge    INTEGER NOT NULL,
+    relation_type   TEXT,
+    confidence      REAL DEFAULT 0.5,
+    provenance      TEXT DEFAULT '[]',
+    UNIQUE(from_hyperedge, to_hyperedge, relation_type)
+);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_clusters (
+    cluster_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    cluster_key     TEXT UNIQUE,
+    hyperedge_type  TEXT,
+    relation_family TEXT,
+    role_signature  TEXT DEFAULT '{}',
+    member_signature TEXT DEFAULT '{}',
+    support_count   INTEGER DEFAULT 0,
+    confidence      REAL DEFAULT 0.5,
+    summary         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ontology_hyperedge_cluster_members (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    cluster_id      INTEGER NOT NULL,
+    hyperedge_id    INTEGER NOT NULL,
+    confidence      REAL DEFAULT 0.5,
+    UNIQUE(cluster_id, hyperedge_id)
+);
+
+CREATE TABLE IF NOT EXISTS ontology_domains (
+    domain_key      TEXT PRIMARY KEY,
+    label           TEXT,
+    domain_type     TEXT,
+    description     TEXT,
+    attributes      TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS ontology_domain_members (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_key      TEXT NOT NULL,
+    node_id         INTEGER NOT NULL,
+    weight          REAL DEFAULT 1.0,
+    confidence      REAL DEFAULT 1.0,
+    UNIQUE(domain_key, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_members_node
+    ON ontology_domain_members(node_id);
+
+CREATE TABLE IF NOT EXISTS ontology_relation_channels (
+    channel_key     TEXT PRIMARY KEY,
+    relation_family TEXT,
+    role_profile    TEXT DEFAULT '{}',
+    source_domains  TEXT DEFAULT '[]',
+    target_domains  TEXT DEFAULT '[]',
+    support_count   INTEGER DEFAULT 0,
+    paper_count     INTEGER DEFAULT 0,
+    confidence      REAL DEFAULT 0.5,
+    summary         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ontology_channel_hyperedges (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_key     TEXT NOT NULL,
+    hyperedge_id    INTEGER NOT NULL,
+    weight          REAL DEFAULT 1.0,
+    UNIQUE(channel_key, hyperedge_id)
+);
+CREATE INDEX IF NOT EXISTS idx_channel_hyperedges_edge
+    ON ontology_channel_hyperedges(hyperedge_id);
 """
 
 
@@ -590,6 +734,443 @@ def queue_direction_flag(conn: sqlite3.Connection, *, edge_id: int,
     return int(cur.lastrowid)
 
 
+
+def _json_obj(value: Any) -> dict:
+    if isinstance(value, dict):
+        return value
+    if value in (None, ""):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_arr(value: Any) -> list:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _condition_rows(items: Any) -> list[dict[str, Any]]:
+    if isinstance(items, dict):
+        return [{"key": k, "value": v} for k, v in items.items()]
+    return [x for x in (items or []) if isinstance(x, dict)]
+
+
+def _measure_rows(items: Any) -> list[dict[str, Any]]:
+    return [x for x in (items or []) if isinstance(x, dict)]
+
+
+def _resolve_hyperedge_member(conn: sqlite3.Connection,
+                              member: dict[str, Any]) -> int | None:
+    if member.get("node_id") is not None:
+        try:
+            node_id = int(member["node_id"])
+        except (TypeError, ValueError):
+            node_id = 0
+        row = conn.execute(
+            "SELECT node_id FROM ontology_nodes WHERE node_id=?", (node_id,)
+        ).fetchone()
+        if row:
+            return int(row["node_id"])
+    name = str(member.get("name") or "").strip()
+    node_type = str(member.get("type") or member.get("node_type") or "").strip()
+    if not name:
+        return None
+    if node_type:
+        row = conn.execute(
+            "SELECT node_id FROM ontology_nodes WHERE node_type=? AND normalized_name=?",
+            (node_type, _norm(name)),
+        ).fetchone()
+        if row:
+            return int(row["node_id"])
+    row = conn.execute(
+        "SELECT node_id FROM ontology_nodes WHERE normalized_name=? LIMIT 1",
+        (_norm(name),),
+    ).fetchone()
+    return int(row["node_id"]) if row else None
+
+
+def _hyperedge_fingerprint(hyperedge_type: str, label: str | None,
+                           members: list[dict[str, Any]],
+                           conditions: list[dict[str, Any]],
+                           measurements: list[dict[str, Any]],
+                           paper_key: str | None,
+                           evidence: list[dict[str, Any]]) -> str:
+    payload = {
+        "type": hyperedge_type,
+        "label": label or "",
+        "paper": paper_key or "",
+        "members": sorted([
+            [int(m["node_id"]), str(m.get("role") or "")]
+            for m in members if m.get("node_id") is not None
+        ]),
+        "conditions": sorted(json.dumps(x, sort_keys=True, ensure_ascii=False)
+                             for x in conditions),
+        "measurements": sorted(json.dumps(x, sort_keys=True, ensure_ascii=False)
+                               for x in measurements),
+        "evidence": sorted(json.dumps(x, sort_keys=True, ensure_ascii=False)
+                           for x in evidence),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def upsert_hyperedge(conn: sqlite3.Connection, *, hyperedge_type: str,
+                     label: str | None = None,
+                     members: list[dict[str, Any]] | None = None,
+                     conditions: Any = None,
+                     measurements: Any = None,
+                     confidence: float = 0.5,
+                     evidence_tier: str | None = None,
+                     paper_key: str | None = None,
+                     provenance: list[dict] | None = None,
+                     attributes: dict | None = None) -> tuple[int, bool]:
+    """写入科研超边；不创建 Reaction/Event 节点，所有角色都存在成员表中。"""
+    hyperedge_type = str(hyperedge_type or "claim").strip()
+    resolved_members = []
+    for pos, member in enumerate(members or []):
+        if not isinstance(member, dict):
+            continue
+        node_id = _resolve_hyperedge_member(conn, member)
+        if node_id is None:
+            continue
+        resolved_members.append({
+            "node_id": node_id,
+            "role": str(member.get("role") or "participant"),
+            "position": int(member.get("position") or pos),
+            "qualifiers": _json_obj(member.get("qualifiers")),
+        })
+    condition_rows = _condition_rows(conditions)
+    measurement_rows = _measure_rows(measurements)
+    evidence_rows = []
+    for item in provenance or []:
+        if isinstance(item, dict):
+            evidence_rows.append({
+                "paper_key": item.get("paper") or paper_key,
+                "section": item.get("section"),
+                "span_text": item.get("evidence") or item.get("span_text") or "",
+                "char_start": item.get("char_start"),
+                "char_end": item.get("char_end"),
+            })
+    fingerprint = _hyperedge_fingerprint(
+        hyperedge_type, label, resolved_members, condition_rows,
+        measurement_rows, paper_key, evidence_rows)
+    row = conn.execute(
+        "SELECT hyperedge_id, confidence, provenance FROM ontology_hyperedges "
+        "WHERE fingerprint=?", (fingerprint,)
+    ).fetchone()
+    now = utcnow()
+    if row:
+        hyperedge_id = int(row["hyperedge_id"])
+        merged_prov = _dedup_provenance(
+            _json_arr(row["provenance"]) + (provenance or []))
+        conn.execute(
+            "UPDATE ontology_hyperedges SET confidence=?, provenance=? "
+            "WHERE hyperedge_id=?",
+            (max(float(row["confidence"] or 0), float(confidence)),
+             json.dumps(merged_prov, ensure_ascii=False), hyperedge_id),
+        )
+        is_new = False
+    else:
+        cur = conn.execute(
+            "INSERT INTO ontology_hyperedges("
+            "hyperedge_type, fingerprint, label, attributes, confidence, "
+            "evidence_tier, paper_key, created_at, provenance"
+            ") VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                hyperedge_type, fingerprint, label,
+                json.dumps(attributes or {}, ensure_ascii=False),
+                max(0.0, min(1.0, float(confidence))),
+                evidence_tier or "unclassified", paper_key, now,
+                json.dumps(provenance or [], ensure_ascii=False),
+            ),
+        )
+        hyperedge_id = int(cur.lastrowid)
+        is_new = True
+    for m in resolved_members:
+        conn.execute(
+            "INSERT OR IGNORE INTO ontology_hyperedge_members("
+            "hyperedge_id, node_id, role, position, qualifiers"
+            ") VALUES(?,?,?,?,?)",
+            (hyperedge_id, m["node_id"], m["role"], m["position"],
+             json.dumps(m["qualifiers"], ensure_ascii=False)),
+        )
+    for c in condition_rows:
+        value = c.get("value", c.get("value_text"))
+        value_num = c.get("value_num")
+        if value_num is None and isinstance(value, (int, float)):
+            value_num = float(value)
+        conn.execute(
+            "INSERT OR IGNORE INTO ontology_hyperedge_conditions("
+            "hyperedge_id, condition_key, operator, value_text, value_num, unit, qualifier"
+            ") VALUES(?,?,?,?,?,?,?)",
+            (
+                hyperedge_id, str(c.get("key") or c.get("condition_key") or ""),
+                c.get("operator"), None if value is None else str(value),
+                value_num, c.get("unit"), c.get("qualifier"),
+            ),
+        )
+    for m in measurement_rows:
+        value = m.get("value", m.get("value_text"))
+        num = m.get("value_num")
+        if num is None and isinstance(value, (int, float)):
+            num = float(value)
+        conn.execute(
+            "INSERT OR IGNORE INTO ontology_hyperedge_measurements("
+            "hyperedge_id, metric, value_text, value_num, unit, qualifier, subject_node"
+            ") VALUES(?,?,?,?,?,?,?)",
+            (
+                hyperedge_id, str(m.get("metric") or m.get("name") or ""),
+                None if value is None else str(value), num, m.get("unit"),
+                m.get("qualifier"), m.get("subject_node"),
+            ),
+        )
+    for e in evidence_rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO ontology_hyperedge_evidence("
+            "hyperedge_id, paper_key, section, span_text, char_start, char_end"
+            ") VALUES(?,?,?,?,?,?)",
+            (
+                hyperedge_id, e.get("paper_key") or paper_key, e.get("section"),
+                e.get("span_text") or "", e.get("char_start"), e.get("char_end"),
+            ),
+        )
+    conn.commit()
+    return hyperedge_id, is_new
+
+
+def list_hyperedges(conn: sqlite3.Connection, *, limit: int = 500,
+                    min_confidence: float = 0.0,
+                    node_ids: set[int] | None = None,
+                    hyperedge_types: list[str] | None = None) -> list[dict[str, Any]]:
+    sql = ("SELECT hyperedge_id, hyperedge_type, label, attributes, confidence, "
+           "evidence_tier, paper_key, created_at, provenance "
+           "FROM ontology_hyperedges WHERE confidence>=?")
+    params: list[Any] = [float(min_confidence)]
+    if hyperedge_types:
+        sql += " AND hyperedge_type IN (" + ",".join("?" * len(hyperedge_types)) + ")"
+        params.extend(hyperedge_types)
+    sql += " ORDER BY confidence DESC, hyperedge_id DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+    rows = conn.execute(sql, params).fetchall()
+    out = []
+    for r in rows:
+        members = [
+            dict(m) for m in conn.execute(
+                "SELECT m.node_id, m.role, m.position, m.qualifiers, "
+                "n.name, n.node_type, n.attributes "
+                "FROM ontology_hyperedge_members m "
+                "JOIN ontology_nodes n ON n.node_id=m.node_id "
+                "WHERE m.hyperedge_id=? ORDER BY m.position, m.id",
+                (r["hyperedge_id"],),
+            ).fetchall()
+        ]
+        if node_ids is not None and not any(
+                int(m["node_id"]) in node_ids for m in members):
+            continue
+        for m in members:
+            for key in ("qualifiers", "attributes"):
+                try:
+                    m[key] = json.loads(m.get(key) or "{}")
+                except json.JSONDecodeError:
+                    m[key] = {}
+        conditions = [
+            dict(x) for x in conn.execute(
+                "SELECT condition_key, operator, value_text, value_num, unit, qualifier "
+                "FROM ontology_hyperedge_conditions WHERE hyperedge_id=? "
+                "ORDER BY id", (r["hyperedge_id"],),
+            ).fetchall()
+        ]
+        measurements = [
+            dict(x) for x in conn.execute(
+                "SELECT metric, value_text, value_num, unit, qualifier, subject_node "
+                "FROM ontology_hyperedge_measurements WHERE hyperedge_id=? "
+                "ORDER BY id", (r["hyperedge_id"],),
+            ).fetchall()
+        ]
+        evidence = [
+            dict(x) for x in conn.execute(
+                "SELECT paper_key, section, span_text, char_start, char_end "
+                "FROM ontology_hyperedge_evidence WHERE hyperedge_id=? "
+                "ORDER BY id", (r["hyperedge_id"],),
+            ).fetchall()
+        ]
+        d = dict(r)
+        for key in ("attributes", "provenance"):
+            try:
+                d[key] = json.loads(d.get(key) or ("[]" if key == "provenance" else "{}"))
+            except json.JSONDecodeError:
+                d[key] = [] if key == "provenance" else {}
+        d.update({"members": members, "conditions": conditions,
+                  "measurements": measurements, "evidence": evidence})
+        out.append(d)
+    return out
+
+
+def rebuild_ontology_views(conn: sqlite3.Connection) -> dict[str, Any]:
+    """重建域与关系通道（均为聚合视图，不创建新节点）。"""
+    conn.execute("DELETE FROM ontology_domain_members WHERE domain_key LIKE 'auto-type:%'")
+    conn.execute("DELETE FROM ontology_domains WHERE domain_key LIKE 'auto-type:%'")
+    node_rows = conn.execute(
+        "SELECT node_id, node_type, name, confidence FROM ontology_nodes"
+    ).fetchall()
+    domain_counts: dict[str, int] = {}
+    for r in node_rows:
+        node_type = str(r["node_type"])
+        key = f"auto-type:{node_type}"
+        domain_counts[key] = domain_counts.get(key, 0) + 1
+        conn.execute(
+            "INSERT OR IGNORE INTO ontology_domains(domain_key,label,domain_type,description,attributes) "
+            "VALUES(?,?,?,?,?)",
+            (key, node_type, "auto_entity_type",
+             f"{node_type} 类型的实体集合", "{}"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO ontology_domain_members(domain_key,node_id,weight,confidence) "
+            "VALUES(?,?,?,?)",
+            (key, int(r["node_id"]), 1.0, float(r["confidence"] or 0.5)),
+        )
+    edges = list_hyperedges(conn, limit=100000, min_confidence=0.0)
+    conn.execute("DELETE FROM ontology_channel_hyperedges WHERE channel_key LIKE 'auto:%'")
+    conn.execute("DELETE FROM ontology_relation_channels WHERE channel_key LIKE 'auto:%'")
+    channels: dict[str, dict[str, Any]] = {}
+    for edge in edges:
+        role_sig = sorted([
+            f"{m.get('role')}:{m.get('node_type')}" for m in edge["members"]
+        ])
+        key_raw = json.dumps([edge["hyperedge_type"], role_sig], ensure_ascii=False, sort_keys=True)
+        key = "auto:" + hashlib.sha1(key_raw.encode("utf-8")).hexdigest()[:20]
+        ch = channels.setdefault(key, {
+            "relation_family": edge["hyperedge_type"],
+            "role_profile": {},
+            "papers": set(),
+            "hyperedges": [],
+            "confidence": [],
+        })
+        for role, node_type in [x.split(":", 1) for x in role_sig if ":" in x]:
+            ch["role_profile"].setdefault(role, [])
+            if node_type not in ch["role_profile"][role]:
+                ch["role_profile"][role].append(node_type)
+        if edge.get("paper_key"):
+            ch["papers"].add(edge["paper_key"])
+        ch["hyperedges"].append(edge["hyperedge_id"])
+        ch["confidence"].append(float(edge.get("confidence") or 0.5))
+    for key, ch in channels.items():
+        conn.execute(
+            "INSERT INTO ontology_relation_channels("
+            "channel_key, relation_family, role_profile, source_domains, "
+            "target_domains, support_count, paper_count, confidence, summary"
+            ") VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                key, ch["relation_family"],
+                json.dumps(ch["role_profile"], ensure_ascii=False),
+                json.dumps([], ensure_ascii=False),
+                json.dumps([], ensure_ascii=False),
+                len(ch["hyperedges"]), len(ch["papers"]),
+                sum(ch["confidence"]) / max(1, len(ch["confidence"])),
+                f"{ch['relation_family']} 角色通道",
+            ),
+        )
+        for hyperedge_id in ch["hyperedges"]:
+            conn.execute(
+                "INSERT OR IGNORE INTO ontology_channel_hyperedges("
+                "channel_key, hyperedge_id, weight) VALUES(?,?,?)",
+                (key, hyperedge_id, 1.0),
+            )
+    conn.commit()
+    return {
+        "domains": len(domain_counts),
+        "domain_members": sum(domain_counts.values()),
+        "channels": len(channels),
+        "hyperedges": len(edges),
+    }
+
+
+
+def backfill_hyperedges_from_legacy(conn: sqlite3.Connection) -> dict[str, int]:
+    """把旧 relation/event 数据投影为兼容超边，不创建额外节点。"""
+    created = 0
+    relations = conn.execute(
+        "SELECT edge_id, relation_type, source_node, target_node, attributes, "
+        "confidence, provenance, evidence_tier FROM ontology_edges"
+    ).fetchall()
+    for r in relations:
+        try:
+            prov = json.loads(r["provenance"] or "[]")
+        except json.JSONDecodeError:
+            prov = []
+        evidence = []
+        paper_keys = []
+        for p in prov:
+            if not isinstance(p, dict):
+                continue
+            if p.get("paper") and p["paper"] not in paper_keys:
+                paper_keys.append(p["paper"])
+            evidence.append({
+                "paper": p.get("paper"),
+                "section": p.get("section"),
+                "evidence": p.get("evidence") or "",
+            })
+        _, is_new = upsert_hyperedge(
+            conn,
+            hyperedge_type="relation",
+            label=r["relation_type"],
+            members=[
+                {"node_id": int(r["source_node"]), "role": "subject"},
+                {"node_id": int(r["target_node"]), "role": "object"},
+            ],
+            conditions={},
+            measurements=[],
+            confidence=float(r["confidence"] or 0.5),
+            evidence_tier=r["evidence_tier"],
+            paper_key=paper_keys[0] if paper_keys else None,
+            provenance=evidence,
+            attributes={"legacy_edge_id": int(r["edge_id"])},
+        )
+        created += int(is_new)
+    events = conn.execute(
+        "SELECT id, paper_key, event_type, trigger, entity_refs, time_text, "
+        "attributes, confidence, provenance FROM event_assertions"
+    ).fetchall()
+    for ev in events:
+        try:
+            refs = json.loads(ev["entity_refs"] or "[]")
+        except json.JSONDecodeError:
+            refs = []
+        try:
+            attrs = json.loads(ev["attributes"] or "{}")
+        except json.JSONDecodeError:
+            attrs = {}
+        try:
+            prov = json.loads(ev["provenance"] or "[]")
+        except json.JSONDecodeError:
+            prov = []
+        _, is_new = upsert_hyperedge(
+            conn,
+            hyperedge_type="event",
+            label=ev["trigger"] or ev["event_type"],
+            members=[{"node_id": int(x), "role": "participant"} for x in refs],
+            conditions={"time": ev["time_text"]} if ev["time_text"] else {},
+            measurements=[],
+            confidence=float(ev["confidence"] or 0.5),
+            paper_key=ev["paper_key"],
+            provenance=prov,
+            attributes=attrs,
+        )
+        created += int(is_new)
+    rebuild_ontology_views(conn)
+    return {"created": created, "relations": len(relations), "events": len(events)}
+
+
 def graph_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     n_nodes = conn.execute("SELECT COUNT(*) AS c FROM ontology_nodes").fetchone()["c"]
     n_edges = conn.execute("SELECT COUNT(*) AS c FROM ontology_edges").fetchone()["c"]
@@ -606,9 +1187,21 @@ def graph_summary(conn: sqlite3.Connection) -> dict[str, Any]:
             "SELECT relation_type, COUNT(*) AS c FROM ontology_edges GROUP BY relation_type"
         )
     }
+    try:
+        n_hyperedges = conn.execute(
+            "SELECT COUNT(*) AS c FROM ontology_hyperedges").fetchone()["c"]
+        n_domains = conn.execute(
+            "SELECT COUNT(*) AS c FROM ontology_domains").fetchone()["c"]
+        n_channels = conn.execute(
+            "SELECT COUNT(*) AS c FROM ontology_relation_channels").fetchone()["c"]
+    except sqlite3.OperationalError:
+        n_hyperedges = n_domains = n_channels = 0
     return {
         "nodes": n_nodes,
         "edges": n_edges,
+        "hyperedges": n_hyperedges,
+        "domains": n_domains,
+        "channels": n_channels,
         "types": n_types,
         "node_by_type": node_by_type,
         "edge_by_type": edge_by_type,

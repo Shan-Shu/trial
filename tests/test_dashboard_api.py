@@ -40,6 +40,12 @@ def seed_db(path: Path) -> None:
     n2, _ = ont.upsert_node(conn, node_type="Dataset", name="OGB", confidence=0.8)
     ont.upsert_edge(conn, relation_type="evaluates", src_id=n1, tgt_id=n2,
                     confidence=0.9)
+    ont.upsert_hyperedge(
+        conn, hyperedge_type="evaluation", label="GNN evaluation",
+        members=[{"node_id": n1, "role": "method"},
+                 {"node_id": n2, "role": "dataset"}],
+        confidence=0.9, paper_key=rec["paper_key"],
+        provenance=[{"paper": rec["paper_key"], "evidence": "GNN evaluated on OGB"}])
     ont.record_ontology_run(conn, rec["paper_key"],
                             {"entities": 2, "relations": 1}, ["Experiment"])
     log_event(conn, "retrieval", "paper-ingested", rec["paper_key"], {"ok": 1})
@@ -104,6 +110,10 @@ class DashboardApiTest(unittest.TestCase):
         g = self.client.get("/api/ontology").json()
         self.assertEqual(g["total"], 2)
         self.assertEqual(len(g["edges"]), 1)
+        self.assertIn("hyperedges", g)
+        self.assertIn("domains", g)
+        self.assertIn("channels", g)
+        self.assertGreaterEqual(len(g["hyperedges"]), 1)
         node_id = g["nodes"][0]["id"]
         nd = self.client.get(f"/api/ontology/nodes/{node_id}").json()
         self.assertIn("node", nd)

@@ -14,6 +14,8 @@ from research_agent.quality.control import (
     maybe_global_merge,
     run_dictionary_merge,
 )
+from research_agent.study.reviewer import deterministic_review
+from research_agent.study.planner import normalize_plan
 from research_agent.retrieval.skills import (
     infer_retrieval_strategy,
     normalize_edge_gaps,
@@ -154,6 +156,101 @@ class RetrievalSkillsControlTest(unittest.TestCase):
                 "SELECT provenance FROM ontology_edges"
             ).fetchone()
             self.assertEqual(len(json.loads(edge["provenance"])), 2)
+        finally:
+            conn.close()
+            tmp.cleanup()
+
+    def test_reviewer_uses_four_to_one_weighting_and_correctness_gate(self):
+        plan = normalize_plan({
+            "goal": "提出两个新方法",
+            "domain": "测试领域",
+            "task_kind": "generative",
+            "instruction_contract": {
+                "task_kind": "generative",
+                "deliverable_format": "markdown",
+                "language": "zh",
+                "required_method_count": 2,
+                "correctness_threshold": 0.85,
+            },
+            "creative_contract": {"min_candidates": 2},
+        }, "提出两个新方法")
+        draft = {
+            "title": "测试",
+            "summary": {"text": "中文摘要", "pattern_ids": [], "evidence_ids": []},
+            "sections": [{"heading": "方法", "items": [
+                {"text": "方法一", "pattern_ids": ["P-0001"],
+                 "evidence_ids": ["E-0001-1"], "status": "supported"}
+            ]}],
+            "strategies": [{"title": "S1", "pattern_ids": ["P-0001"],
+                            "evidence_ids": ["E-0001-1"]}],
+            "markdown": "# 测试\n中文内容",
+        }
+        knowledge = {
+            "patterns": [{"pattern_id": "P-0001"}],
+            "evidence": [{"evidence_id": "E-0001-1"}],
+        }
+        review = deterministic_review(plan, draft, knowledge, "提出两个新方法")
+        self.assertEqual(review["decision"], "revise")
+        self.assertAlmostEqual(
+            review["overall_score"],
+            0.8 * review["instruction_compliance"]["score"]
+            + 0.2 * review["evidence_correctness"]["score"], places=3)
+
+        bad_draft = {
+            "title": "坏草稿",
+            "summary": {"text": "中文", "pattern_ids": [], "evidence_ids": []},
+            "sections": [{"heading": "结论", "items": [
+                {"text": "断言", "pattern_ids": [],
+                 "evidence_ids": ["E-9999-1"], "status": "supported"}
+            ]}],
+            "markdown": "# 坏草稿\n中文断言",
+        }
+        bad = deterministic_review(
+            normalize_plan({"goal": "总结", "task_kind": "summary"}, "总结"),
+            bad_draft, {"patterns": [], "evidence": []}, "总结")
+        self.assertLess(
+            bad["evidence_correctness"]["score"],
+            bad["evidence_correctness"]["threshold"])
+        self.assertNotEqual(bad["decision"], "pass")
+
+    def test_hyperedge_keeps_roles_conditions_measurements_without_event_node(self):
+        tmp = tempfile.TemporaryDirectory()
+        path = Path(tmp.name) / "hyperedge.db"
+        conn = connect(path)
+        ont.init_ontology(conn)
+        try:
+            a, _ = ont.upsert_node(conn, node_type="Chemical", name="A",
+                                   confidence=0.9)
+            pd, _ = ont.upsert_node(conn, node_type="Catalyst", name="Pd",
+                                    confidence=0.9)
+            b, _ = ont.upsert_node(conn, node_type="Chemical", name="B",
+                                   confidence=0.9)
+            edge_id, is_new = ont.upsert_hyperedge(
+                conn, hyperedge_type="reaction", label="A to B",
+                members=[
+                    {"node_id": a, "role": "substrate"},
+                    {"node_id": pd, "role": "catalyst"},
+                    {"node_id": b, "role": "product"},
+                ],
+                conditions=[{"key": "temperature", "value": 80, "unit": "°C"}],
+                measurements=[{"metric": "yield", "value": 85, "unit": "%"}],
+                confidence=0.9, paper_key="p1",
+                provenance=[{"paper": "p1", "evidence": "A with Pd gives B"}],
+            )
+            self.assertTrue(is_new)
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM ontology_nodes").fetchone()[0], 3)
+            rows = ont.list_hyperedges(conn)
+            self.assertEqual(len(rows), 1)
+            node = rows[0]
+            self.assertEqual({m["role"] for m in node["members"]},
+                             {"substrate", "catalyst", "product"})
+            self.assertEqual(node["conditions"][0]["condition_key"], "temperature")
+            self.assertEqual(node["measurements"][0]["metric"], "yield")
+            self.assertGreaterEqual(edge_id, 1)
+            views = ont.rebuild_ontology_views(conn)
+            self.assertGreaterEqual(views["domains"], 2)
+            self.assertGreaterEqual(views["channels"], 1)
         finally:
             conn.close()
             tmp.cleanup()

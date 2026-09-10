@@ -142,11 +142,40 @@ def mine_ontology_evidence(conn: sqlite3.Connection,
         }
     for e in evidence:
         e["year"] = year_rows.get(e["paper_key"])
+    hyperedges = []
+    try:
+        hyperedges = ont.list_hyperedges(
+            conn, limit=1000, min_confidence=min_conf)
+    except Exception:
+        hyperedges = []
+    for h in hyperedges:
+        member_names = [str(m.get("name") or "") for m in h.get("members") or []]
+        text = " ".join([str(h.get("label") or ""), " ".join(member_names),
+                         " ".join(str(c.get("condition_key") or "")
+                                  for c in h.get("conditions") or []),
+                         " ".join(str(m.get("metric") or "")
+                                  for m in h.get("measurements") or [])])
+        h["relevance"] = _relevance(terms, text)
+        paper_keys = []
+        for e in h.get("evidence") or []:
+            key = clean_str(e.get("paper_key"))
+            if key and key not in paper_keys:
+                paper_keys.append(key)
+        h["paper_keys"] = paper_keys
+        h["support_count"] = len(paper_keys)
+        all_papers.update(paper_keys)
+    if terms:
+        hyperedges.sort(key=lambda x: (x.get("relevance", 0),
+                                       x.get("support_count", 0),
+                                       x.get("confidence", 0)), reverse=True)
+    hyperedges = hyperedges[:200]
+
     coverage = 0.0
-    if patterns:
-        avg_support = sum(p["support_count"] for p in patterns) / len(patterns)
+    if patterns or hyperedges:
+        avg_support = sum(p["support_count"] for p in patterns) / max(1, len(patterns))
         coverage = round(min(1.0, max(
-            len(patterns) / max(1, int(mission.get("min_patterns") or 5)),
+            (len(patterns) + len(hyperedges))
+            / max(1, int(mission.get("min_patterns") or 5)),
             avg_support / 3.0,
         )), 3)
     return {
@@ -157,6 +186,7 @@ def mine_ontology_evidence(conn: sqlite3.Connection,
         },
         "patterns": patterns,
         "evidence": evidence,
+        "hyperedges": hyperedges,
         "coverage_score": coverage,
     }
 

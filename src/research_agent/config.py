@@ -69,6 +69,7 @@ class Settings:
     max_extract_chunks: int = 4     # 一篇论文最多抽取的文本块数（控制成本）
     q_flag_penalty: float = 0.85    # “标记后发送”的文献，质量权重折扣
     strong_edge_min_conf: float = 0.72  # 低于此阈值的强因果/调控边标记 candidate
+    review_correctness_min: float = 0.85  # 审核：证据与引用正确性最低阈值
 
     # ---------- 质量控制：全局领域词典归并 ----------
     global_merge_enabled: bool = True
@@ -141,6 +142,8 @@ class Settings:
         s.refine_max_items = int(os.getenv("RA_REFINE_MAX_ITEMS", s.refine_max_items))
         s.refine_max_attempts = int(
             os.getenv("RA_REFINE_MAX_ATTEMPTS", s.refine_max_attempts))
+        s.review_correctness_min = _env_float(
+            "RA_REVIEW_CORRECTNESS_MIN", s.review_correctness_min)
         s.global_merge_enabled = _env_bool("RA_GLOBAL_MERGE", s.global_merge_enabled)
         s.global_merge_interval_nodes = int(os.getenv(
             "RA_GLOBAL_MERGE_INTERVAL_NODES", s.global_merge_interval_nodes))

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from research_agent.config import Settings, settings as default_settings
+from research_agent.ontology import store as ont
 from research_agent.db import (
     connect,
     get_paper,
@@ -158,6 +159,9 @@ def overview(db_path: Path | str | None = None) -> dict[str, Any]:
             "ontology": {
                 "nodes": _count(conn, "ontology_nodes"),
                 "edges": _count(conn, "ontology_edges"),
+                "hyperedges": _count(conn, "ontology_hyperedges"),
+                "domains": _count(conn, "ontology_domains"),
+                "channels": _count(conn, "ontology_relation_channels"),
                 "types": _count(conn, "ontology_type_registry"),
                 "node_types": node_types,
                 "edge_types": edge_types,
@@ -823,9 +827,47 @@ def ontology_graph(db_path: Path | str | None = None, *,
                         "type": e["relation_type"],
                         "confidence": round(float(e["confidence"] or 0), 3),
                     })
+        hyperedges = []
+        try:
+            if _table(conn, "ontology_hyperedges"):
+                hyperedges = ont.list_hyperedges(
+                    conn, limit=min(500, max(50, limit)),
+                    min_confidence=min_confidence,
+                    node_ids=node_ids if node_ids else None,
+                )
+        except Exception:
+            hyperedges = []
+        domains = []
+        channels = []
+        try:
+            if _table(conn, "ontology_domains"):
+                domains = [dict(r) for r in conn.execute(
+                    "SELECT d.domain_key, d.label, d.domain_type, d.description, "
+                    "COUNT(m.node_id) AS member_count "
+                    "FROM ontology_domains d LEFT JOIN ontology_domain_members m "
+                    "ON m.domain_key=d.domain_key GROUP BY d.domain_key "
+                    "ORDER BY member_count DESC LIMIT 100"
+                ).fetchall()]
+            if _table(conn, "ontology_relation_channels"):
+                channels = [dict(r) for r in conn.execute(
+                    "SELECT channel_key, relation_family, role_profile, "
+                    "source_domains, target_domains, support_count, paper_count, "
+                    "confidence, summary FROM ontology_relation_channels "
+                    "ORDER BY support_count DESC, confidence DESC LIMIT 300"
+                ).fetchall()]
+                for c in channels:
+                    for key in ("role_profile", "source_domains", "target_domains"):
+                        try: c[key] = json.loads(c.get(key) or "null")
+                        except json.JSONDecodeError: pass
+        except Exception:
+            domains = domains or []
+            channels = channels or []
         return {"nodes": nodes, "edges": edges,
+                "hyperedges": hyperedges, "domains": domains, "channels": channels,
                 "truncated": truncated, "total": total,
-                "shown_nodes": len(nodes), "shown_edges": len(edges)}
+                "shown_nodes": len(nodes), "shown_edges": len(edges),
+                "shown_hyperedges": len(hyperedges),
+                "shown_domains": len(domains), "shown_channels": len(channels)}
     finally:
         conn.close()
 

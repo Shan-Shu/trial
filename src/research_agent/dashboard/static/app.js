@@ -90,6 +90,7 @@ async function loadOverview() {
     ["人工审核", (qd.human || 0) + " · 待办 " + ((o.paper_status || {}).human_review || 0), ""],
     ["本体节点", o.ontology.nodes, o.ontology.types ? `类型 ${o.ontology.types}` : ""],
     ["本体关系", o.ontology.edges, ""],
+    ["科研超边", o.ontology.hyperedges || 0, o.ontology.domains ? `域 ${o.ontology.domains} · 通道 ${o.ontology.channels}` : ""],
     ["活动事件", o.logs, o.last_activity ? "最近 " + fmtTs(o.last_activity) : ""],
   ];
   $("#statChips").innerHTML = chips.map(
@@ -379,6 +380,7 @@ function drawGraph(data, keepView) {
     box.innerHTML = '<p class="hint">暂无本体节点 —— 先运行流水线入库论文。</p>';
     state.network = null;
     $("#graphStats").textContent = "";
+    renderStructure(data);
     return;
   }
   const nodes = new vis.DataSet(data.nodes.map((n) => ({
@@ -396,13 +398,61 @@ function drawGraph(data, keepView) {
     width: 0.6 + e.confidence * 2.2,
   })));
   $("#graphStats").textContent =
-    `节点 ${data.shown_nodes}/${data.total} · 边 ${data.shown_edges}` +
+    `节点 ${data.shown_nodes}/${data.total} · 边 ${data.shown_edges} · 超边 ${data.shown_hyperedges || 0} · 域 ${data.shown_domains || 0} · 通道 ${data.shown_channels || 0}` +
     (data.truncated ? "（已截断）" : "");
+  renderStructure(data);
   if (state.network) { state.network.destroy(); state.network = null; }
   box.innerHTML = "";
   state.network = new vis.Network(box, { nodes, edges }, buildGraphOptions());
   state.network.on("click", (params) => {
     if (params.nodes && params.nodes.length) showNodeDetail(params.nodes[0]);
+  });
+}
+
+function renderStructure(data) {
+  const panel = $("#structurePanel");
+  if (!panel) return;
+  const domains = (data.domains || []).slice(0, 8);
+  const channels = (data.channels || []).slice(0, 8);
+  const hyperedges = (data.hyperedges || []).slice(0, 6);
+  const roleText = (profile) => {
+    if (!profile || typeof profile !== "object") return "";
+    return Object.entries(profile).map(([role, types]) =>
+      `${role}: ${Array.isArray(types) ? types.join("/") : types}`).join(" · ");
+  };
+  panel.innerHTML = `
+    <div class="struct-block">
+      <h4>节点域</h4>
+      <div class="struct-chips">${domains.map((d) => `
+        <button class="struct-chip domain-chip" data-domain-type="${esc(d.label || "")}">
+          <b>${esc(d.label || d.domain_key)}</b><span>${esc(d.member_count || 0)} 节点</span>
+        </button>`).join("") || '<span class="muted">暂无域</span>'}</div>
+    </div>
+    <div class="struct-block">
+      <h4>关系通道</h4>
+      <div class="struct-list">${channels.map((c) => `
+        <div class="struct-row"><b>${esc(c.relation_family || c.channel_key)}</b>
+          <span>${esc(roleText(c.role_profile))}</span>
+          <span>支持 ${esc(c.support_count || 0)} · 论文 ${esc(c.paper_count || 0)} · conf ${esc(c.confidence || 0)}</span>
+        </div>`).join("") || '<span class="muted">暂无通道</span>'}</div>
+    </div>
+    <div class="struct-block">
+      <h4>科研超边</h4>
+      <div class="struct-list">${hyperedges.map((h) => {
+        const members = (h.members || []).map((m) => `${m.role || "participant"}: ${m.name}`).join("; ");
+        return `<div class="struct-row"><b>H-${String(h.hyperedge_id).padStart(4, "0")} ${esc(h.label || h.hyperedge_type)}</b>
+          <span>${esc(members)}</span><span>conf ${esc(h.confidence)} · evidence ${esc((h.evidence || []).length)}</span></div>`;
+      }).join("") || '<span class="muted">暂无超边；后续抽取会自动写入</span>'}</div>
+    </div>`;
+  [...panel.querySelectorAll(".domain-chip")].forEach((btn) => {
+    btn.onclick = () => {
+      const t = btn.dataset.domainType;
+      if (!t) return;
+      state.selectedTypes.clear();
+      state.selectedTypes.add(t);
+      renderTypeFilters(state.nodeTypes);
+      loadGraph();
+    };
   });
 }
 
