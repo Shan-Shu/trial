@@ -1,4 +1,4 @@
-﻿# research-agent
+# research-agent
 
 基于 **LangGraph** 的多模型协作科研辅助 Agent —— 项目环境骨架与最小可运行演示。
 
@@ -168,8 +168,8 @@ uv run python examples\research_tools.py "graph neural network"
 
 ## 8. 三节点科研文献流水线（基于动态本体）
 
-`research-agent-pipeline`：**文献检索 → 质量控制 → 知识提取** 的 LangGraph 状态机，
-产出物写入本地 SQLite（`data\research_agent.db`），供动态本体检索/推理使用。
+`research-agent-pipeline`：**文献检索 → 质量控制 → 知识提取** 的内部数据构建状态机。
+v0.4.0 起它不再作为完整研究任务的顶层入口，完整任务统一从 `research-agent-study` 的 Planner 开始。
 
 ```
 START ──> retrieval ──> quality ──┬─(knowledge / flagged)──> knowledge ──> END
@@ -283,55 +283,34 @@ uv run research-agent-viz --dataset demo --open
 `ontology/viz.py` 同时提供 API：`export_graph_from_db(db)`、`build_demo_graph()`、
 `render_interactive_html(graph)`、`render_static_svg/png(graph)` 可复用到其它界面/报告。
 
-## 10. 三节点 LLM 化（DeepSeek V4 / GLM 4.7 Flash / DeepSeek V4 Pro*）
+## 10. 三节点 LLM 化（数据构建子流程）
 
-> \* 知识提取节点当前用 DeepSeek V4 Pro 临时替代 ChatGPT 5.6（OpenAI 在当前网络不可达），
-> 可随时切回：`ROLE_PROVIDER_KNOWLEDGE=openai`、`KNOWLEDGE_MODEL=gpt-5.6`。
-
-三个节点现在分别由指定 LLM 驱动（`models.py` 角色绑定表，全部可用 .env 覆盖）：
+数据构建子流程的三个节点由 LLM 驱动，可通过 `.env` 覆盖：
 
 | 节点 | 默认模型 | provider / 接口 | 所需 API Key |
 |---|---|---|---|
-| 文献检索（retriever） | `deepseek-v4-pro`（DeepSeek V4，可换 `deepseek-v4-flash`） | deepseek | `DEEPSEEK_API_KEY` |
+| 文献检索（retriever） | `deepseek-v4-flash` | deepseek | `DEEPSEEK_API_KEY` |
 | 质量控制（quality） | `deepseek-v4-flash` | deepseek | `DEEPSEEK_API_KEY` |
-| 知识提取（knowledge） | `deepseek-v4-pro`（DeepSeek V4 Pro，临时替代 gpt-5.6） | deepseek | `DEEPSEEK_API_KEY` |
+| 知识提取（knowledge） | `deepseek-v4-flash` | deepseek | `DEEPSEEK_API_KEY` |
 
 ### 各节点如何“用 LLM 实现”
-- **检索节点**：DeepSeek V4 负责「动脑」——把主题拆解为互补检索式（`plan_queries`）、
-  规整多源原始元数据补齐作者/单位/DOI（`clean_metadata`）；arXiv/OpenAlex/Crossref
-  仍负责实际的检索与下载（LLM 无法联网抓取）。
-- **质量控制节点**：DeepSeek V4 Flash 依据文献元数据给出 期刊分区/venue/h/被引 等子项评分与
-  学科速度判断；`A/T/Q` 仍按既定公式 `Q=0.6A+0.4T` 计算与路由，保证规则可复现，
-  并把评审意见写入 `rationale`；节点还会在本体新增节点达到阈值时做领域词典全局归并。
-- **知识节点**：DeepSeek V4 Pro（临时替代 ChatGPT 5.6，因当前网络无法访问
-  `api.openai.com`）负责把精校正文抽取为 实体/关系/属性/事件 的结构化 JSON，
-  置信度按 `0.6*模型自评+0.4*质量权重` 融合后写入动态本体。
+- **检索节点**：LLM 负责把主题拆解为互补检索式，并规整多源原始元数据；实际联网、下载和解析仍由检索适配器完成。
+- **质量控制节点**：LLM 给出期刊分区、venue、h-index、被引量和领域速度判断，A/T/Q 公式与路由规则保持确定性。
+- **知识节点**：LLM 把正文抽取为实体、关系、属性、事件和科研超边，再与文献质量权重融合后写入动态本体。
 
-无 Key / 模型不可用时自动回退到确定性实现（检索直接检索、评分走规则公式、
-知识提取跳过），不影响流水线运行。
+无 Key / 模型不可用时，流水线可按各节点的确定性实现继续运行；完整研究任务层不采用静默降级策略。
 
 ### 使用
 ```powershell
-# 在 .env 填入 DeepSeek 与智谱两把 Key 后（默认 auto 即按上表绑定）：
 uv run research-agent-pipeline --query "graph neural network" --max-results 5
-
-# 显式指定/切换某一节点模型（smoke=离线假 LLM，none=关闭该节点 LLM）
 uv run research-agent-pipeline --query "RAG" --retriever-llm deepseek `
-    --quality-llm glm --knowledge-llm openai
-
-# 无 Key 全链路演示：三角色全部用离线假 LLM（联网检索仍真实）
+    --quality-llm deepseek --knowledge-llm deepseek
 uv run research-agent-pipeline --query "knowledge graph construction" --llm-smoke
 ```
 
-模型标识与平台说明（2026 现状）：DeepSeek V4 家族为 `deepseek-v4-pro/flash`；
-GLM 4.7 Flash 的模型 code 为 `glm-4.7-flash`（智谱开放平台免费）。知识提取当前
-用 DeepSeek V4 Pro 替代 ChatGPT 5.6（OpenAI API id `gpt-5.6`），待 OpenAI 网络
-可用后，设 `ROLE_PROVIDER_KNOWLEDGE=openai` + `KNOWLEDGE_MODEL=gpt-5.6` 即可切回。
-如你的平台模型 id 不同，直接在 `.env` 改
-`RETRIEVAL_MODEL / QUALITY_MODEL / KNOWLEDGE_MODEL` 即可。
-
-新增离线测试（`tests/test_llm_roles.py`）验证：检索节点按 LLM 规划的多查询入库多篇、
-质量节点用假 GLM 子项评分覆盖规则结果（含 `[LLM 评审]` rationale 入库）。
+模型标识与平台说明（2026 现状）：DeepSeek V4 家族为 `deepseek-v4-pro/flash`。
+如你的平台模型 id 不同，可在 `.env` 修改
+`RETRIEVAL_MODEL / QUALITY_MODEL / KNOWLEDGE_MODEL`。
 
 ## 11. 多库检索与全文优先（默认 fulltext）
 
@@ -376,43 +355,72 @@ NCPSSD 无独立 API Key，检索接口返回结构化元数据与摘要；历�
 `fulltext_source=abstract`。NCPSSD 期刊通常缺少 DOI/作者机构，质量节点对
 该源放宽为“作者+期刊出版信息”完整即可进入知识提取。
 
-## 12. 四节点研究任务层（规划 / 知识消费 / 内容形成 / 审核校对）
+## 12. Planner-first 研究任务层（规划 / 检索 / 消费 / 内容 / 审核 / 事实核查）
 
-在既有“检索 -> 质量 -> 知识”建库流水线上增加一层面向研究任务的高层编排。
-知识消费节点不直接由 LLM 查库：它从动态本体读取可溯源模式卡/证据卡，
-语料不足时向现有数据流水线发出补集请求。
+v0.4.0 统一了执行结构，v0.4.1 补齐了"机制 → 机会 → 算子 → 候选 → 核查"的闭环：
 
 ```text
-planner ──> knowledge_consumer ──> content_builder ──> reviewer
-                │  语料不足              ▲                  │
-                └── 调用现有 pipeline ────┴─ revise ─────────┘
+用户输入
+  → planner
+  → collection（retrieval → quality → knowledge）
+  → knowledge_consumer（DeepSeek V4 Pro）
+  → content_builder（DeepSeek V4 Pro）
+  → reviewer（DeepSeek V4 Pro）
+  → fact_checker（DeepSeek V4 Pro）
+  → END
 ```
+
+关键约定：
+
+- Planner 是唯一入口，先生成 `retrieval_plan`、`analysis_plan`、`evidence_policy`、`design_contract` 和停止条件；
+- collection 只执行 Planner 的 `retrieval_plan`，不再由 Consumer 隐式触发检索；
+- Knowledge Consumer 由 LLM 完成机制理解、冲突识别、机会发现、设计上下文和补检请求，代码只负责数据库查询、编号、引用校验和硬门槛；
+- 超边按类型配额检索（event 型优先）并做机制相关性加权，机制超边不再被置信度截断挤掉；
+- `design_context` 固定五键：`mechanism_states`（必须绑定真实 `evidence_id` / `hyperedge_id`）、`reaction_primitives`、`opportunity_gaps`、`operator_candidates`、`constraint_conflicts`；
+- 候选方案以 **算子链**（`operator_chain`）为基本单位，算子只能取自 `study/reaction_operators.py` 的封闭词表，代码层校验"词表外算子 / 链是否衔接 / 推出等级"；
+- 候选池先生成 30–50 个种子，再聚类去重、评分排序，选出 4–6 个最终方案并给出优先级与互斥关系；
+- Reviewer 增加"设计契约检查"（并入指令符合度，不新增一级维度）：算子链合法性、创新等级下限、硬约束逐条回应、候选差异是否可解释；
+- Reviewer / Fact Checker 的修订意见回流内容节点，逐条给出 `revision_responses`；事实核查含代码层硬结论，模型不能把高危问题判 pass；
+- 每次运行的关键中间态写入数据库 `study_runs` 表，可审计"改了什么、为什么改"；
+- Planner、Consumer、Content、Reviewer、FactChecker 默认均绑定 `deepseek-v4-pro`，统一使用 `DEEPSEEK_API_KEY`；
+- 生产模式下模型不可用会明确失败，不静默回退为纯代码流程；事实核查缺少模型时降级为确定性核查。
 
 目录：
 
 ```text
 src/research_agent/study/
-├── planner.py     # 工作规划节点：模糊请求 -> 语料采集任务单
-├── consumer.py    # 知识消费节点：动态本体 -> 模式卡/证据卡
-├── content.py     # 内容形成节点：模式卡/证据卡 -> 可溯源草稿
-├── reviewer.py    # 审核校对节点：引用存在性/支持度门控
-├── collection.py  # 与现有 retrieval->quality->knowledge 的补集桥接
-└── graph.py       # LangGraph 编排与 CLI
+├── planner.py             # 统一任务契约与 retrieval_plan
+├── collection.py          # 检索子流程调度
+├── consumer.py            # LLM 机制消费、机会发现与设计上下文
+├── reaction_operators.py  # 自研反应设计算子库（封闭词表 + 链校验）
+├── content.py             # 内容形成、候选池、去重排序
+├── reviewer.py            # 指令符合度 + 证据正确性 + 设计契约
+├── fact_check.py          # 事实核查（无来源断言/伪造引用/数值缺证据）
+└── graph.py               # Planner-first LangGraph 编排与 CLI
 ```
 
 使用：
 
 ```powershell
-# 离线确定性运行（不调用 LLM，验证四节点编排）
-uv run research-agent-study --request "骨修复支架前沿" --db data\ontology_v05.db --llm-smoke
-
-# 真实模型运行：规划 DeepSeek V4 Flash / 内容 DeepSeek V4 Pro / 审核 GLM 4.7 Flash
+# 生产模式：五个研究节点均使用 DeepSeek V4 Pro，并默认先检索
 uv run research-agent-study --request "RAG 2024-2026 前沿综述" --db data\ontology_v05.db
 
-# 先调用现有检索/质量/知识流水线补充语料，再进入四节点
-uv run research-agent-study --request "..." --collect
+# 只消费本地知识，不执行初始检索
+uv run research-agent-study --request "RAG 2024-2026 前沿综述" --db data\ontology_v05.db --no-collect
+
+# 离线确定性运行（仅用于测试，不调用 LLM）
+uv run research-agent-study --request "骨修复支架前沿" --db data\ontology_v05.db --llm-smoke
+
+# 知识包健康检查：机制超边保留率、提示词预算、可追溯率
+uv run python examples\dump_knowledge_pack.py --db data\ynamide_multiazabicycle_v020.db --seed "ynamide annulation"
+
+# v0.4.1 端到端基线（真实 LLM，落盘 plan/consumer/draft/review/fact_check）
+uv run python examples\run_v040_baseline.py --db data\ynamide_multiazabicycle_v020.db --out-dir output\v040_baseline
 ```
 
-角色可在 `.env` 中通过 `PLANNER_MODEL / CONTENT_MODEL / REVIEW_MODEL` 覆盖。
-知识消费节点返回的每一条证据均带 `paper_key`、原文句和 `evidence_id`；
-审核节点只允许草稿引用这些真实 ID，禁止内容形成节点自造来源。
+Dashboard 默认也注入五个 DeepSeek V4 Pro 角色和完整 collection 子流程；
+`create_app(..., inject_llms=False)` 仅用于离线测试。
+
+语料卫生：`collect_mission` 会先过领域相关性硬门（`apply_topic_relevance_gate`），
+把与主题词元零重叠的跨域命中挡在入库之前，避免污染机制抽取。检索报告里的
+`relevance_gate` 字段会记录被丢弃的记录数与样例。

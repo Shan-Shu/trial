@@ -1,7 +1,9 @@
-# 当前 LLM 提示词清单（v0.3.1）
+# 当前 LLM 提示词清单（v0.4.1）
 
 > 生成自各节点的 Python 常量，未手工改写。
-> v0.3.0 起：知识抽取增加 `hyperedges` 输出；审核节点按“用户指令符合度 80% + 证据与引用正确性 20%”双维度评估，并执行正确性最低阈值。
+> v0.4.0 起：完整任务按 Planner-first 编排；Planner / Consumer / Content / Reviewer 统一绑定 DeepSeek V4 Pro。
+> v0.4.1 起：新增事实核查节点；消费节点输出固定五键 design_context（须绑定真实编号）；
+> 内容节点以算子链为候选基本单位；审核节点增加设计契约检查。
 
 ## 模型绑定
 
@@ -10,9 +12,14 @@
 | 文献检索 retriever | deepseek-v4-flash | `retrieval/llm.py` |
 | 质量控制 quality | deepseek-v4-flash | `quality/llm.py` |
 | 知识提取 knowledge | deepseek-v4-flash | `knowledge/extractor.py` |
-| 工作规划 planner | deepseek-v4-flash | `study/planner.py` |
-| 内容形成 content | deepseek-v4-flash | `study/content.py` |
-| 审核校对 review | glm-4.7-flash | `study/reviewer.py` |
+| 工作规划 planner | deepseek-v4-pro | `study/planner.py` |
+| 知识消费 consumer | deepseek-v4-pro | `study/consumer.py` |
+| 内容形成 content | deepseek-v4-pro | `study/content.py` |
+| 审核校对 review | deepseek-v4-pro | `study/reviewer.py` |
+| 事实核查 fact_check | deepseek-v4-pro | `study/fact_check.py` |
+
+> 事实核查节点缺少模型时不会中断主链路：自动降级为确定性核查（引用存在性、
+> 无来源断言、数值缺证据），并在 `fact_check.mode` 中标记。
 
 ## 一、文献检索节点
 
@@ -222,7 +229,28 @@ BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Research
 12. involves 关系克制使用：event.participants 仅列直接参与该事件的关键实体（≤5 个），
     仅在确有参与关系时给出；不要把同句共现的无关概念全部拉成 participants，
     避免 involves 变成笼统的“共现”关系。
+13. conditions / measurements 必须真的填写，不允许留空数组：只要原文出现任何可量化的
+    做法、配方、参数或结果，就必须落到 conditions 或 measurements 里。
+    - 化学/材料/实验类超边（procedure、causal_relation、observation）
+      必须给出 conditions：temperature(°C)、duration(h/min)、solvent、catalyst、
+      ligand、additive、base、atmosphere、equivalent、mol%、concentration、pH、
+      pressure、setting；有产率/选择性/性能数字时必须给出 measurements。
+    - 评测/社科/生物医学类超边必须给出 measurements：accuracy、effect_size、p_value、
+      frequency、score、sample_size、coverage、period 等。
+    - conditions 用 {"key","operator","value","unit"}：key 用上面的标准键；
+      operator 用 = / > / < / between / described_as；
+      value 写原文数值或名称（如 "80" 或 "toluene"），unit 写单位或 null。
+    - measurements 用 {"metric","value","unit","qualifier"}：value 写原文数值，
+      qualifier 可写测定条件（如 "isolated"、"NMR"、"per 100 g"）。
+    - 例子：80 °C、12 h、5 mol% Pd(PPh3)4、2.0 equiv Cs2CO3、toluene、under argon、
+      收率 87%、ee 94%、dr > 20:1、p < 0.01、n = 120。
+    - 严禁把上面这些数字塞进 attributes 或不写；conditions/measurements 空着等于丢数据。
 ```
+
+> v0.4.1 说明：此前 conditions/measurements 在"模型输出 → 超边落库"的适配层被整体丢弃
+> （实测 3851 条超边只有 34 条条件、0 条测量），因此 `knowledge/node.py` 已改为原样透传；
+> 同时 `flag_issues()` 新增确定性追问：超边文本里出现温度/当量/产率等线索却没有
+> conditions/measurements 时，会在二次精修中作为问题点名要求补填。
 
 ### 3.3 属性规范 ATTRIBUTE_HINT
 
@@ -391,21 +419,26 @@ predicate 字段可补充具体内容，但避免重复动词。
 ### 4.1 PLANNER_PROMPT
 
 ```text
-你是科研辅助系统的工作规划节点。用户会给出较简单或模糊的指令，
-你需要把指令转成一份结构化“研究任务单”，供知识消费节点和内容形成节点执行。
+你是科研辅助系统的工作规划节点，也是整个研究任务的统一入口。
+你必须先把用户请求转换成可执行的研究任务单，后续检索、质量评估、知识提取、
+知识消费、内容形成和审核都只能依据这份任务单工作。
 
 硬性要求：
 1. 不要生成内容大纲，不要预设章节，不要预判研究结论；
-2. 先判断任务性质：summary(综述/调研)、generative(提出新方法/新方案/新设计)、
-   frontier(前沿探索)、evaluation(评估/比较/选择)；
-3. 对 generative 任务，必须输出 creative_contract，说明需要生成什么、
-   可以组合哪些方向、最少生成几个候选、如何判断“不是简单复述”；
-4. 再把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
-5. 领域画像可随任务生成，但任务性质和生成要求必须是领域无关的；
-6. seed_terms 必须是英文检索词，覆盖领域核心词、方法/机理、评价与应用词；
-   禁止把用户整句话直接作为 seed_terms 或 domain；
-7. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
-8. 只输出 JSON 对象，不要代码块，不要解释。
+2. 判断任务性质：summary(综述/调研)、generative(提出新方法/新方案/新设计)、
+   frontier(前沿探索)、evaluation(评估/比较/选择)、proof(证明)；
+3. 必须生成 retrieval_plan，明确检索什么、为什么检索、覆盖哪些维度、
+   使用哪些来源、时间范围和停止条件；用户原话不能未经规划直接作为检索词；
+4. 必须生成 analysis_plan 和 evidence_policy，统一约束后续节点的分析维度和证据标准；
+5. 对 generative 任务必须生成 design_contract，明确目标对象、目标结构硬约束、
+   创新等级下限、候选数量、差异轴、评价标准和限制；
+6. creative_contract 仅作兼容字段，可以保留，但不能把组合/替换/迁移当作核心创新；
+7. seed_terms 使用能直接投递到目标文献库的检索词：国际学术库用英文，
+   NCPSSD/CNKI 等中文库用中文；禁止把用户整句话直接作为 seed_terms 或 domain；
+8. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
+9. retrieval 字段保留现有检索策略兼容；默认 broad，若用户要求补强证据缺口则启用
+   evidence_gap，仅在明确要求单领域深挖时启用 deep_single_domain；
+10. 只输出 JSON 对象，不要代码块，不要解释。
 
 示例（只参考字段风格，不要照抄用户原话作为 domain/seed_terms）：
 用户原话：尝试提出一种炔酰胺构建多元氮杂化合物的新方法
@@ -422,17 +455,37 @@ predicate 字段可补充具体内容，但避免重复动词。
   "goal": "一句话目标",
   "domain": "研究领域",
   "content_type": "research_report|frontier_review|research_directions|experiment_protocol",
-  "task_kind": "summary|generative|frontier|evaluation",
-  "creative_contract": {{
+  "task_kind": "summary|generative|frontier|evaluation|proof",
+  "analysis_plan": {{
+    "dimensions": ["机制", "底物范围", "选择性", "条件兼容性", "反例"],
+    "required_comparisons": [],
+    "open_questions": []
+  }},
+  "evidence_policy": {{
+    "traceability_required": true,
+    "hypothesis_label_required": true,
+    "minimum_support": 2,
+    "allow_evidence_gap_retrieval": true
+  }},
+  "design_contract": {{
     "objective": "用户期望获得的新对象/新方案描述",
+    "target_constraints": {{"hard_constraints": [], "must_explain": []}},
+    "innovation_floor": "L3",
+    "min_candidates": 4,
+    "differentiation_axes": ["mechanism", "intermediate", "selectivity", "operator_chain"],
+    "evaluation_criteria": ["目标匹配", "创新等级", "机制可行性", "证据支持", "验证成本"],
+    "constraints": ["不能只复述已有方案", "必须区分假设与已知事实"]
+  }},
+  "creative_contract": {{
+    "objective": "兼容旧内容节点的生成目标",
     "focus": "研究或设计焦点",
-    "min_candidates": 3,
-    "creative_operations": ["组合已有方案", "跨域迁移", "替换组件", "扩展对象范围"],
+    "min_candidates": 4,
+    "creative_operations": [],
     "constraints": ["不能只复述已有方案", "必须区分假设与已知事实"],
     "evaluation_criteria": ["新颖性", "可行性", "可解释性", "可验证性"]
   }},
   "domain_profile": {{
-    "domain_kind": "chemistry|biomedicine|materials|general",
+    "domain_kind": "chemistry|biomedicine|materials|humanities_social_science|general",
     "dimensions": ["该领域应覆盖的检索/分析维度"],
     "candidate_entity_types": ["首轮可试用的实体类型"],
     "candidate_relation_types": ["首轮可试用的关系类型"],
@@ -446,6 +499,40 @@ predicate 字段可补充具体内容，但避免重复动词。
     "collection_mode": "broad",
     "recency_window": "2018-01-01:{today}"
   }},
+  "retrieval_plan": {{
+    "objective": "需要收集什么证据",
+    "query_variants": ["实际可投递检索词"],
+    "source_mix": ["europepmc", "arxiv", "semantic_scholar"],
+    "dimensions": ["mechanism", "substrate_scope", "selectivity"],
+    "recency_window": "2018-01-01:{today}",
+    "max_results_per_query": 20,
+    "min_quality": 0.6,
+    "must_cover": ["目标骨架", "关键中间体", "反例"],
+    "stop_conditions": ["核心机制至少两条独立证据", "主要路线覆盖达到阈值"]
+  }},
+  "retrieval": {{
+    "strategy": "broad|evidence_gap|deep_single_domain",
+    "evidence_gap_enabled": false,
+    "deep_single_domain_enabled": false,
+    "min_support_target": 2,
+    "max_skill_rounds": 2,
+    "relevance_gate": "strict",
+    "reference_direction": "both"
+  }},
+  "instruction_contract": {{
+    "task_kind": "summary|generative|frontier|evaluation|proof",
+    "deliverable_format": "markdown|docx|pdf|text",
+    "language": "zh",
+    "required_method_count": 0,
+    "required_sections": [],
+    "must_include": [],
+    "must_exclude": [],
+    "reference_style": "ACS|numeric|none",
+    "evidence_policy": "每条实质断言可溯源",
+    "correctness_threshold": 0.85
+  }},
+  "stop_conditions": ["检索达到覆盖要求", "新增证据不再改变主要结论"],
+  "budget": {{"max_collection_rounds": 2, "max_total_results": 160}},
   "deliverable": {{
     "format": "markdown",
     "sections_policy": "emergent",
@@ -455,29 +542,142 @@ predicate 字段可补充具体内容，但避免重复动词。
 }}
 
 请直接输出可解析的 JSON：
-
-注意：creative_contract 必须用领域无关语言描述“生成什么、如何生成、如何评价”，
-domain_profile 才用来实例化领域词汇。
 ```
 
-## 五、内容形成节点
+## 五、知识消费节点
 
-### 5.1 CONTENT_PROMPT
+### 5.1 CONSUMER_PROMPT（v0.4.1）
+
+> v0.4.1 变更：新增算子词表注入（`{operators}`）、`design_context` 五键的完整字段结构、
+> `*_ids` 字段的引用纪律；`design_context` 每一项都必须绑定真实编号。
+
+```text
+你是科研知识消费节点。数据库查询、证据编号和追溯关系已经由代码准备好。
+你的任务不是复述模式卡，而是把结构化知识转换成机制理解、研究边界和设计机会。
+
+输入：
+1. task_plan：Planner 生成的研究任务契约（含 design_contract，如创新等级下限、目标硬约束）；
+2. knowledge：patterns、evidence、hyperedges（含 event 型机制超边、条件、测量和证据句）。
+
+硬性规则：
+- 只能使用输入中真实存在的 pattern_id、evidence_id 或 H-xxxx 超边编号；
+- design_context 中每个条目都要带 evidence_ids 或 hyperedge_ids，指向真实编号；
+- 需要新建条目时用 state_id / gap_id / op_id 编号（MS-0001 / GAP-0001 / OP-0001）；
+- 严禁把描述性文字写进名为 *ids 的字段；描述文字放到普通文本字段；
+- 不得补造机制、中间体、条件或文献结论；信息不足时写入 evidence_gaps；
+- 区分已知事实、机制推断和未知缺口；
+- 至少检查机制冲突、条件冲突、目标对象缺口和证据覆盖缺口；
+- 若需要补检，返回 retrieval_requests，而不是假装已有证据；
+- 只输出 JSON 对象，不要代码块和解释。
+
+算子词表（operator_chain 中的 operator 必须取自下表；不要自造算子名）：
+{operators}
+
+输出结构：
+{{
+  "summary": "当前知识包的主要机制、边界和缺口摘要",
+  "mechanism_clusters": [{{"name": "机制簇", "states": [], "evidence_ids": []}}],
+  "known_conflicts": [{{"description": "冲突", "evidence_ids": [], "severity": "high|medium|low"}}],
+  "evidence_gaps": [{{"description": "缺少什么证据", "why_needed": "为什么影响任务", "priority": "high|medium|low"}}],
+  "retrieval_requests": [{{"reason": "补检原因", "query_terms": [], "must_cover": [], "evidence_ids": []}}],
+  "design_context": {{
+    "mechanism_states": [{{
+      "state_id": "MS-0001",
+      "start_state": "起始底物/起始态",
+      "activation_mode": "活化方式",
+      "intermediate": "关键中间体",
+      "bond_changes": ["C-N formation", "C-C cleavage"],
+      "selectivity_control": "区域/立体选择性来源",
+      "catalyst_cycle": "催化循环或价态变化",
+      "termination": "终止步骤",
+      "known_side_reactions": [],
+      "evidence_ids": ["E-0001-1"],
+      "hyperedge_ids": ["H-0001"],
+      "confidence": 0.0
+    }}],
+    "reaction_primitives": [{{
+      "op_id": "OP-0001", "name": "反应原语名称", "input_state": "输入",
+      "output_state": "输出", "evidence_ids": [], "hyperedge_ids": []
+    }}],
+    "opportunity_gaps": [{{
+      "gap_id": "GAP-0001",
+      "gap_type": "mechanism_target_gap|condition_conflict|missing_link|selectivity_unresolved",
+      "known_mechanism": "已有机制", "unmet_target": "目标对象",
+      "missing_link": "缺失环节", "risk": "主要风险",
+      "evidence_ids": [], "hyperedge_ids": []
+    }}],
+    "operator_candidates": [{{
+      "op_id": "OP-0001", "name": "算子名（取自词表）",
+      "operator_chain": [{{"operator": "polarity_reversal", "input": "输入态", "output": "输出态"}}],
+      "target": "该算子链针对的目标对象",
+      "evidence_ids": [], "hyperedge_ids": []
+    }}],
+    "constraint_conflicts": [{{
+      "constraint": "Planner 硬约束", "conflict": "冲突点",
+      "evidence_ids": [], "hyperedge_ids": []
+    }}]
+  }},
+  "confidence": 0.0
+}}
+
+task_plan:
+{plan}
+
+knowledge:
+{knowledge}
+
+请直接输出 JSON：
+```
+
+### 5.2 算子词表（注入到 `{operators}`）
+
+来源：`src/research_agent/study/reaction_operators.py`。词表是**封闭**的：
+LLM 只能选择并排序，代码层会丢弃词表外的算子名并记录 `unknown_operators`。
+
+机制级算子（L3）：`polarity_reversal`、`dearomatization`、`strain_release`、
+`transient_directing`、`carbene_migration`、`radical_polar_crossover`、
+`dual_catalysis_relay`、`selectivity_lock`、`intermediate_capture`、
+`ring_contraction_expansion`、`bond_migration`、`heteroatom_insertion`、
+`dynamic_kinetic_resolution`、`switchable_valence`、`cascade_termination`。
+
+低层级算子（保留可用但不作为核心创新标签）：
+`combine`(L2)、`substitute`(L1)、`migrate`(L1)、`extend`(L1)、
+`unclassified_transform`(L2)。
+
+### 5.3 代码层校验（不依赖模型自觉）
+
+| 校验 | 行为 |
+|---|---|
+| 引用形状 | 只有形如 `P-0001 / E-0001-1 / H-0001 / MS-0001` 的字符串才按引用处理 |
+| 引用存在性 | 形状正确但不存在 → `invalid_references` |
+| 描述文字误放 | 非 ID 文本放进 `*_ids` → 回收到 `unattributed_notes`，不静默删除 |
+| 机制状态溯源 | 无 `evidence_ids` / `hyperedge_ids` 的条目 `traceable=false` |
+| 算子链 | 词表外算子丢弃并记录；前后不衔接记 `chain_breaks`；据此推出 `declared_level` |
+| 空设计上下文 | LLM 未给出机制状态与算子链时，用确定性层补齐并标记 `llm+deterministic_fill` |
+
+## 六、内容形成节点
+
+### 6.1 CONTENT_PROMPT（v0.4.1）
+
+> v0.4.1 变更：输入新增 `consumer_analysis` 与 `design_context`；明确"候选方案以算子链为核心"。
 
 ```text
 你是科研内容形成节点。工作方式是“先看证据，再形成结构”，
 不允许先假设章节再找论据。
 
 输入材料：
-1. 研究任务单 task_plan；
-2. 知识消费节点返回的模式卡 patterns 与证据卡 evidence。
+1. 研究任务单 task_plan（含 analysis_plan、evidence_policy、design_contract）；
+2. 知识消费节点返回的机制理解 consumer_analysis 与设计上下文 design_context；
+3. 模式卡 patterns、证据卡 evidence 与科研超边 hyperedges。
 
 要求：
 1. 从 patterns 中观察高支持度、高置信度、同关系聚合的模式，再归纳章节和论点；
-2. 每条实质性论点必须引用真实存在的 pattern_id / evidence_id；
+2. 每条实质性论点必须引用真实存在的 pattern_id / evidence_id / hyperedge_id；
 3. 无法被证据支撑但值得提出的内容标为 status="open_question"，不要伪造证据；
 4. 不要把 correlation 写成 causality；
-5. 只输出 JSON 对象，不要代码块、不要解释。
+5. design_context 是候选方案的主要素材来源：mechanism_states 提供机制起点，
+   opportunity_gaps 提供缺口，operator_candidates 提供算子链原型；
+6. 只输出 JSON 对象，不要代码块、不要解释。
 
 task_plan:
 {plan}
@@ -488,106 +688,192 @@ knowledge:
 输出 JSON 结构：
 {{
   "title": "内容标题",
-  "summary": {{
-    "text": "一段摘要",
-    "pattern_ids": [],
-    "evidence_ids": []
-  }},
+  "summary": {{"text": "一段摘要", "pattern_ids": [], "evidence_ids": []}},
   "sections": [
-    {{
-      "heading": "由证据归纳出的章节名",
-      "items": [
-        {{
-          "text": "具体观点",
-          "pattern_ids": ["P-xxxx"],
-          "evidence_ids": ["E-xxxx"],
-          "status": "supported|hypothesis|open_question"
-        }}
-      ]
-    }}
+    {{"heading": "由证据归纳出的章节名",
+      "items": [{{"text": "具体观点", "pattern_ids": ["P-xxxx"],
+                  "evidence_ids": ["E-xxxx"],
+                  "status": "supported|hypothesis|open_question"}}]}}
+  ],
+  "edge_gaps": [
+    {{"pattern_id": "P-xxxx", "source_type": "源实体类型", "source_name": "源实体",
+      "relation_type": "promotes", "target_type": "目标实体类型",
+      "target_name": "目标实体", "support_count": 1, "target_support": 2,
+      "priority": "high|medium|low", "reason": "该边当前只有单篇支持，若用于强结论需补强"}}
   ]
 }}
 
 请直接输出 JSON：
 ```
 
-### 5.2 GENERATIVE_BLOCK（generative 任务追加）
+### 6.2 GENERATIVE_BLOCK（generative 任务追加，v0.4.1）
+
+> v0.4.1 变更：候选池（`candidates`）取代 `strategies`；要求算子链、创新等级、
+> 硬约束逐条回应、差异说明；`{pool_size}` / `{min_mechanistic}` / `{innovation_floor}`
+> / `{operators}` 由代码按 `design_contract` 注入。
 
 ```text
 
-附加生成要求：
-当前任务为 generative，不能只做“文献归纳”。你必须在 sections 之外额外生成
-strategies 数组，至少 {min_candidates} 个差异化的候选方案。
+附加生成要求（任务性质 generative，以下为硬性要求）：
+1. 必须在 sections 之外输出 candidates 数组，至少 {pool_size} 个**种子候选**，
+   用于后续聚类去重；不要为了凑数把同一机制换底物写成多条。
+2. 每个候选的核心是 operator_chain，不是“组合/替换/迁移/扩展”。
+   - operator 必须取自下面的算子词表，**不得自造算子名**；
+   - 每个算子的 input / output 要写清前后态，序列必须首尾衔接；
+   - 至少 {min_mechanistic} 个候选的算子链要达到 {innovation_floor} 级（含机制级算子）。
+3. 每个候选必须显式标注 satisfies_constraints：逐条回应 design_contract 的
+   target_constraints.hard_constraints，说明满足或无法满足的理由。
+4. differentiation 字段用一句话说明“这个候选和其余候选的本质区别”。
+5. status 必须为 hypothesis。
 
-每个候选方案应说明：
-1. 目标：希望得到的新对象/新方法/新框架；
-2. 使用的已有组件或方法；
-3. 采用的创造操作（组合、迁移、替换、扩展、设计流水线等）；
-4. 创新来源：为什么不是已有方案的同义改写；
-5. 依据：哪些 pattern/evidence 支持其组成部件；
-6. status 必须为 hypothesis。
+算子词表（只允许使用下列 operator 名称）：
+{operators}
 
-strategies JSON 结构：
+candidates JSON 结构：
 {{
-  "strategies": [
+  "candidates": [
     {{
-      "id": "S-01",
+      "id": "C-01",
       "title": "候选方案名称",
-      "target": "目标对象/方案",
-      "components": ["已有组件A", "已有组件B"],
-      "creative_operation": "组合/迁移/替换/扩展/新流水线",
-      "novelty_source": "为什么新",
+      "target": "目标对象/骨架",
+      "operator_chain": [
+        {{"operator": "polarity_reversal", "input": "起始态", "output": "中间态"}},
+        {{"operator": "intermediate_capture", "input": "中间态", "output": "目标骨架"}}
+      ],
+      "innovation_level": "L3",
+      "innovation_basis": "为什么达到该等级（相对已有方案的机制差异）",
+      "differentiation": "与其余候选的本质区别",
+      "satisfies_constraints": [
+        {{"constraint": "Planner 硬约束原文", "satisfied": true,
+          "reason": "满足或不满足的具体理由"}}
+      ],
+      "components": ["用到的已有方法/组件"],
+      "novelty_source": "创新来源（机制层面，而非换底物）",
       "rationale": "为什么可能可行",
+      "mechanism_evidence": ["MS-0001", "GAP-0001"],
       "pattern_ids": [],
       "evidence_ids": [],
-      "status": "hypothesis",
       "risks": [],
-      "validation_plan": "如何验证"
+      "validation_plan": "最小验证实验"
     }}
   ]
 }}
-
 ```
 
-## 六、审核校对节点
+### 6.3 REVISION_BLOCK（审核未通过时追加，v0.4.1）
 
-### 6.1 REVIEW_PROMPT
+> 这是"反馈闭环"的落点：审核与事实核查的 `revision_actions` 会拼进下一次内容生成的提示词，
+> 并要求逐条回应；模型没回应的条目由代码层补记为"未解决"。
 
 ```text
-你是科研内容审核校对节点。你的职责不是补充内容，而是核查内容形成节点
-的草稿是否所有实质观点都可溯源。
+
+上一轮审核未通过，必须逐条处理下列修订意见（revision_actions）：
+{revision_actions}
+
+要求：
+1. 每条意见都要在 revision_responses 中给出 resolved=true/false 与理由；
+2. 若无法解决，说明具体缺什么证据，并写入 edge_gaps；
+3. 修订后重新输出完整 JSON（包含 candidates），不要只输出差异。
+```
+
+### 6.4 候选池后处理（代码层，非提示词）
+
+| 步骤 | 实现 |
+|---|---|
+| 阶段 1 | 提示词只要求 ≤16 个"骨架候选"（目标/算子链/等级/硬约束回应/差异），避免超长 JSON |
+| 规范化 | 每个候选补全 `operator_chain`、`satisfies_constraints`、创新等级；缺失硬约束自动补为未满足 |
+| 聚类去重 | 按"算子序列 + 目标"指纹分组，每组保留信息最全的一个，其余记入 `candidate_pool.duplicates` |
+| 评分 | 3×等级分 + 2.5×硬约束满足率 + 1.5×证据支持 − 1×链断裂 − 1×纯低阶算子 |
+| 选择 | 先保证达到 `innovation_floor` 的候选入选，再按总分补足；输出首选/备选/不建议实施的排序 |
+| 阶段 2 | 只对入选候选调用一次 `EXPAND_PROMPT` 补全风险/验证计划/可行性论证；算子链以阶段 1 为准 |
+
+### 6.5 EXPAND_PROMPT（阶段 2：候选深化）
+
+```text
+你是科研内容形成节点的"候选深化"步骤。
+
+上一阶段已经选出下列 {count} 个候选方案（含机制算子链），它们的机制方向已经确定。
+现在只做一件事：为这些候选补全可执行细节，不要新增候选、不要改动 operator_chain。
+
+必须为每个候选补全：
+1. satisfies_constraints：逐条回应 design_contract 的硬约束（每条给 satisfied + reason）；
+2. risks：至少 2 条具体风险（条件兼容性/选择性/副反应/放大）；
+3. validation_plan：最小验证实验（底物、条件范围、判据、成功的判定标准）；
+4. rationale：为什么该算子链在化学上可能成立；
+5. novelty_source：相对已有方案的机制差异（不得写成"换底物/换催化剂"）。
+
+design_contract:
+{contract}
+
+待深化的候选（operator_chain 必须原样保留）：
+{candidates}
+```
+
+## 七、审核校对节点
+
+### 7.1 REVIEW_PROMPT（v0.4.1）
+
+> v0.4.1 变更：新增"设计契约检查"（仍并入指令符合度，不新增一级评分维度），
+> 并要求候选的 `innovation_level` 不得高于算子链实际推出的等级。
+
+```text
+你是科研内容审核校对节点。你的职责不是补充内容，而是核查草稿是否完成用户指令，并核查证据和引用是否正确。
+
+审核只有两个一级维度，禁止自行增加其他一级评分维度：
+1. instruction_compliance：用户指令符合度，权重 80%。创新性、归纳、总结、证明、格式、数量等要求都放在这里逐项检查；
+2. evidence_correctness：证据与引用正确性，权重 20%。设置 correctness_threshold 最低阈值；低于阈值必须 revise 或 need_more_data。
+
+生成型任务的设计契约检查（design_contract，若有）也放在 instruction_compliance 内逐项判定，
+不要新增一级维度：
+- 每个候选是否给出 operator_chain，且算子名取自给定词表、序列前后衔接；
+- 候选的 innovation_level 是否达到 design_contract.innovation_floor；
+- 候选是否逐条回应 design_contract.target_constraints.hard_constraints；
+- 候选之间是否在 differentiation 上真正不同，而不是同一机制换底物。
 
 给定材料：
-1. task_plan：研究任务单；
-2. draft：待审核草稿（含结构化 items 与 markdown）；
-3. knowledge：知识消费节点返回的真实 pattern/evidence 清单。
+1. user_request：用户原始指令；
+2. instruction_contract：从指令中抽取的硬约束和软约束；
+3. task_plan：规范化任务单（含 design_contract）；
+4. knowledge：真实的 pattern/evidence/hyperedge 清单；
+5. draft：待审核草稿（含 strategies 候选方案与 candidate_pool 统计）。
 
-核查规则：
-1. item.status="supported" 时必须至少引用一个真实 evidence_id；
-2. item 引用的 pattern_id / evidence_id 必须全部存在于 knowledge 中；
-3. 原文是 correlation 时不得在草稿中写成 causality；
-4. 草稿不得新增 knowledge 之外的引用或来源；
-5. 若只是缺少证据，请指出 location，并让内容节点改为 revise 或标记 open_question；
-6. 若任务需要的领域在当前语料中没有覆盖，返回 need_more_data 并说明缺口。
-
-当 task_plan.task_kind="generative" 时，额外检查：
-7. strategies 数量不得少于 creative_contract.min_candidates；
-8. 每个 strategy 必须有目标、创造操作、组件依据和待验证计划；
-9. 不能只复述已有模式，候选之间应有差异化的生成逻辑。
+硬性规则：
+- supported 内容必须至少有一个真实 evidence_id 或 hyperedge_id；
+- 不得引用不存在的 pattern_id / evidence_id / hyperedge_id；
+- 不得新增 knowledge 之外的来源；
+- 不得把 correlation 写成 causality；
+- 不得把假设写成已证实事实；
+- 缺少证据时给 need_more_data，格式或内容遗漏给 revise。
 
 只输出 JSON 对象：
 {{
-  "decision": "pass|revise|need_more_data",
-  "summary": "一句话审核结论",
-  "issues": [
-    {{
-      "severity": "critical|minor",
-      "type": "missing_evidence|bad_reference|overclaim|coverage_gap|other",
-      "location": "标题/章节/item",
-      "problem": "问题描述"
-    }}
-  ]
+  "decision": "pass|revise|need_more_data|manual_review",
+  "summary": "一句话结论",
+  "instruction_compliance": {{
+    "score": 0.0,
+    "requirements": [
+      {{"id": "R1", "category": "content|method|coverage|logic|format|safety|design",
+        "type": "mandatory|optional", "requirement": "可判定的要求",
+        "status": "met|partial|unmet|not_applicable", "location": "章节/位置",
+        "reason": "判断理由", "revision_action": "需要修改时填写"}}
+    ],
+    "critical_failures": []
+  }},
+  "evidence_correctness": {{
+    "score": 0.0, "threshold": 0.85, "hard_fail": false,
+    "checks": [
+      {{"type": "citation_exists|correct_attribution|no_fabrication|no_overclaim|no_unsupported_number|contradiction_preserved",
+        "status": "pass|partial|fail", "location": "章节/位置", "reason": "问题说明"}}
+    ]
+  }},
+  "revision_actions": []
 }}
+
+user_request:
+{request}
+
+instruction_contract:
+{contract}
 
 task_plan:
 {plan}
@@ -599,4 +885,73 @@ draft:
 {draft}
 
 请直接输出 JSON：
+```
+
+### 7.2 代码层设计契约检查（确定性，覆盖模型判断）
+
+| 检查项 | 严重度 | 判定依据 |
+|---|---|---|
+| 至少 N 个候选方案 | critical | `design_contract.min_candidates` vs 实际候选数 |
+| 每个候选都有合法算子链 | critical | 词表校验后链为空即不通过 |
+| 算子链取自词表且前后衔接 | major | `unknown_operators` / `chain_breaks` |
+| 至少 N 个候选达到创新等级下限 | critical | 由算子链推出的等级（模型自评高于链等级时取链等级） |
+| 不得把换底物/组合作为核心创新标签 | critical | 全部候选等级 ≤ L2 即不通过 |
+| 每个候选逐条回应目标硬约束 | critical | `satisfies_constraints` 覆盖全部 `hard_constraints` |
+| 候选池先扩充再聚类去重 | major | `candidate_pool.generated / after_dedupe / duplicates` |
+| 候选差异轴可解释 | major | 是否存在"全部候选共用同一算子链" |
+
+## 八、事实核查节点（v0.4.1 新增）
+
+### 8.1 FACT_CHECK_PROMPT
+
+```text
+你是事实核查节点。你的职责不是改写内容，而是找出草稿中的事实性问题。
+
+只检查三类问题：
+1. fabrication：与给定证据句矛盾、或证据中并不存在的断言；
+2. unsupported_claim：标记为 supported 但没有绑定真实 evidence_id / hyperedge_id 的断言；
+3. contradiction：同一草稿内部前后矛盾的表述（例如同一数字或机制给出两种说法）。
+
+规则：
+- 只能用 knowledge 中真实存在的 pattern_id / evidence_id / hyperedge_id 作为依据；
+- 不确定的问题标 severity="low"，不要为了凑数把假设说成错误；
+- 每条问题必须给出 location（章节/候选编号）与 revision_action；
+- 只输出 JSON 对象，不要代码块。
+
+输出结构：
+{{
+  "decision": "pass|revise",
+  "issues": [
+    {{"type": "fabrication|unsupported_claim|contradiction",
+      "severity": "high|medium|low", "location": "章节或候选编号",
+      "problem": "问题描述", "evidence_ids": [],
+      "revision_action": "应当如何修改"}}
+  ],
+  "summary": "一句话结论"
+}}
+
+knowledge:
+{knowledge}
+
+draft:
+{draft}
+
+请直接输出 JSON：
+```
+
+### 8.2 确定性核查（始终执行，模型不能覆盖）
+
+| 检查 | 判定 |
+|---|---|
+| 引用存在性 | 草稿/候选引用的编号不在知识包内 → `fabrication`（high） |
+| 无来源断言 | `status="supported"` 但没有任何引用 → `unsupported_claim`（high） |
+| 数值缺证据 | 候选文本出现 `95%`、`80 °C` 一类数值而证据句中不存在该数字 → `fabrication`（medium） |
+| 模型覆盖 | 确定性 high 级问题不允许被模型判 `pass` 抹掉 |
+
+### 8.3 路由与终止
+
+```text
+reviewer ──pass──► fact_checker ──pass──► END
+   ▲                    │
+   └── revise ──────────┘（review_rounds > 1 时改为 manual_review，避免死循环）
 ```
