@@ -359,13 +359,17 @@ def node_status(db_path: Path | str | None = None,
         {"id": "human_review", "group": "数据构建", "label": "人工审核",
          "desc": "低质量或元数据无法补全的文献"},
         {"id": "planner", "group": "研究流程", "label": "工作规划节点",
-         "desc": "解析用户请求，判断检索策略并生成任务单"},
+         "desc": "解析用户请求，生成检索、分析、证据与生成契约"},
+        {"id": "collection", "group": "研究流程", "label": "检索执行节点",
+         "desc": "执行 Planner retrieval_plan -> 检索/评估/知识提取"},
         {"id": "knowledge_consumer", "group": "研究流程", "label": "知识消费节点",
-         "desc": "读取本体模式/证据，输出证据缺口或请求补集"},
+         "desc": "LLM 机制理解 / 机会发现 / 设计上下文 / 补检请求"},
         {"id": "content_builder", "group": "研究流程", "label": "内容形成节点",
          "desc": "生成可溯源草稿，并返回需要补强的边"},
         {"id": "reviewer", "group": "研究流程", "label": "审核校对节点",
-         "desc": "核查引用、证据支持与覆盖缺口"},
+         "desc": "核查引用、证据支持、设计契约（算子链/创新等级/硬约束）与覆盖缺口"},
+        {"id": "fact_checker", "group": "研究流程", "label": "事实核查节点",
+         "desc": "核查无来源断言、伪造引用与数值缺证据，可回流修订"},
     ]
     conn = _open(db_path)
     try:
@@ -476,13 +480,17 @@ def study_status(db_path: Path | str | None = None,
 
         defs = [
             ("planner", "工作规划节点",
-             "解析用户请求，生成语料采集任务单"),
+             "解析用户请求，生成检索、分析、证据与生成契约"),
+            ("collection", "检索执行节点",
+             "执行 Planner retrieval_plan -> 检索/评估/知识提取"),
             ("knowledge_consumer", "知识消费节点",
-             "从动态本体读取模式/证据，或请求补集"),
+             "LLM 机制理解 / 机会发现 / 设计上下文 / 补检请求"),
             ("content_builder", "内容形成节点",
-             "基于模式卡/证据卡生成可溯源草稿"),
+             "候选池 -> 算子链 -> 聚类去重与排序"),
             ("reviewer", "审核校对节点",
-             "核查引用、冲突与覆盖缺口"),
+             "引用、证据、设计契约与覆盖缺口"),
+            ("fact_checker", "事实核查节点",
+             "无来源断言、伪造引用与数值缺证据"),
         ]
         nodes = []
         for event_name, label, desc in defs:
@@ -530,14 +538,22 @@ def study_status(db_path: Path | str | None = None,
                 summary["knowledge"] = {
                     "patterns": det.get("patterns"),
                     "evidence": det.get("evidence"),
+                    "hyperedges": det.get("hyperedges"),
                     "coverage_score": det.get("coverage_score"),
                     "papers": det.get("papers"),
+                    "mechanism_states": det.get("mechanism_states"),
+                    "operator_candidates": det.get("operator_candidates"),
+                    "traceability": det.get("traceability"),
                 }
             elif ev["event"] == "content_builder" and det.get("status") == "done":
                 summary["draft"] = {
                     "title": det.get("title"),
                     "sections": det.get("sections"),
                     "markdown_chars": det.get("markdown_chars"),
+                    "candidates_generated": det.get("candidates_generated"),
+                    "candidates_after_dedupe": det.get("candidates_after_dedupe"),
+                    "candidates_selected": det.get("candidates_selected"),
+                    "selected_levels": det.get("selected_levels"),
                 }
             elif ev["event"] == "reviewer":
                 summary["review"] = {
@@ -545,6 +561,13 @@ def study_status(db_path: Path | str | None = None,
                     "issues": det.get("issues"),
                     "round": det.get("round"),
                     "summary": det.get("summary"),
+                    "design_failures": det.get("design_failures"),
+                }
+            elif ev["event"] == "fact_checker":
+                summary["fact_check"] = {
+                    "decision": det.get("decision"),
+                    "issues": det.get("issues"),
+                    "mode": det.get("mode"),
                 }
         return {
             "run_id": run_id,
@@ -600,7 +623,8 @@ def activity_log(limit: int = 80,
 
 
 def run_planner_request(request_text: str,
-                        db_path: Path | str | None = None) -> dict[str, Any]:
+                        db_path: Path | str | None = None,
+                        model: Any = None) -> dict[str, Any]:
     """在工作规划节点上执行一条用户指令，返回任务单并写入事件日志。"""
     from research_agent.config import Settings
     from research_agent.study.planner import make_planner_node
@@ -608,7 +632,7 @@ def run_planner_request(request_text: str,
     settings = Settings(db_path=Path(db_path or default_settings.db_path))
     conn = _open(settings.db_path)
     try:
-        node = make_planner_node(None, conn=conn, settings=settings)
+        node = make_planner_node(model, conn=conn, settings=settings)
         out = node({"request": str(request_text or "").strip()})
         return {
             "status": out.get("status"),

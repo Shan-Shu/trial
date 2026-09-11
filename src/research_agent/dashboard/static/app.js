@@ -130,6 +130,7 @@ const AGENT_TAG = {
   human_review: "tag-human_review",
   study: "tag-study",
   planner: "tag-study",
+  collection: "tag-study",
   knowledge_consumer: "tag-study",
   content_builder: "tag-study",
   reviewer: "tag-study",
@@ -141,7 +142,8 @@ const EVENT_ZH = {
   "review-submitted": "提交人工审核结果",
   "skipped-no-model": "跳过提取(无模型)",
   "session-start": "研究流程开始", "session-end": "研究流程结束",
-  "planner": "工作规划", "knowledge_consumer": "知识消费",
+  "planner": "工作规划", "collection": "检索执行",
+  "knowledge_consumer": "知识消费",
   "content_builder": "内容形成", "reviewer": "审核校对",
 };
 
@@ -260,8 +262,9 @@ async function loadStudyFlow() {
     <span class="dim">结束 ${fmtFull(data.ended_at)}</span>`;
   const nodes = data.nodes || [];
   const nodeLabels = {
-    planner: ["工作规划", "解析请求并生成任务单"],
-    knowledge_consumer: ["知识消费", "读取本体模式/证据，必要时请求补集"],
+    planner: ["工作规划", "生成检索、分析、证据与生成契约"],
+    collection: ["检索执行", "按 retrieval_plan 执行检索/评估/知识提取"],
+    knowledge_consumer: ["知识消费", "LLM 机制理解、机会发现与补检判断"],
     content_builder: ["内容形成", "依据证据卡生成可溯源草稿"],
     reviewer: ["审核校对", "核查引用与证据支持度"],
   };
@@ -270,6 +273,9 @@ async function loadStudyFlow() {
     let detail = "";
     const d = n.details || {};
     if (n.id === "planner") detail = d.goal || (d.seed_terms || []).join("; ") || "";
+    if (n.id === "collection") {
+      detail = d.queries ? `查询 ${d.queries.length} · 轮次 ${d.round ?? "-"}` : d.count != null ? `新增 ${d.count}` : "";
+    }
     if (n.id === "knowledge_consumer") {
       detail = (d.patterns != null ? `模式 ${d.patterns} · 证据 ${d.evidence} · 覆盖率 ${d.coverage_score ?? "-"}` : d.reason) || "";
     }
@@ -313,7 +319,7 @@ async function loadStudyFlow() {
     let detail = "";
     if (e.event === "planner") detail = det.goal || "";
     if (e.event === "knowledge_consumer") {
-      detail = det.patterns != null ? `patterns=${det.patterns}, evidence=${det.evidence}` : det.reason || "";
+      detail = det.patterns != null ? `patterns=${det.patterns}, evidence=${det.evidence}, mode=${det.consumer_mode || "-"}` : det.reason || "";
     }
     if (e.event === "content_builder") detail = det.title || "";
     if (e.event === "reviewer") detail = `${det.decision || ""} issues=${det.issues ?? 0}`;

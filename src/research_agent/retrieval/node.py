@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import sqlite3
 from typing import Any
 
@@ -101,6 +102,70 @@ def _process_records(
     return {"paper_keys": ingested, "count": len(ingested), "errors": errors}
 
 
+def apply_topic_relevance_gate(records: list[dict],
+                               topic_terms: list[str] | None,
+                               *,
+                               min_overlap: int = 1) -> tuple[list[dict], list[dict]]:
+    """领域相关性硬门：把明显跨域的命中挡在入库之前。
+
+    背景：语料一旦混入跨域论文（例如炔酰胺任务里混进脂质体/疟疾文献），
+    后续机制抽取、机会挖掘与候选生成都会被污染，而且很难在消费层补救。
+
+    规则（保守优先，避免误杀）：
+    - records 的 title/abstract/keywords 文本过短（< 30 字符）视为不可判定，放行；
+    - 长文本记录必须与 topic_terms 有至少 ``min_overlap`` 个词元重叠；
+    - 词元按拉丁词（≥4 字符）与中文字符串（≥2 字）切分，忽略停用词。
+    """
+    if not topic_terms:
+        return list(records), []
+    tokens = _topic_tokens(topic_terms)
+    if not tokens:
+        return list(records), []
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for rec in records:
+        text = " ".join([
+            str(rec.get("title") or ""),
+            str(rec.get("abstract") or ""),
+            str(rec.get("keywords") or ""),
+        ])
+        low = text.lower()
+        stripped = low.strip()
+        if len(stripped) < 30:
+            kept.append(rec)
+            continue
+        hits = 0
+        for token in tokens:
+            if token in low:
+                hits += 1
+                if hits >= min_overlap:
+                    break
+        if hits >= min_overlap:
+            kept.append(rec)
+        else:
+            dropped.append({**rec, "_gate_reason": "topic_token_overlap_zero"})
+    return kept, dropped
+
+
+_STOPWORDS = {
+    "the", "and", "for", "with", "from", "into", "that", "this", "these",
+    "those", "study", "studies", "using", "used", "based", "novel", "new",
+    "review", "research", "results", "analysis", "method", "methods",
+    "effect", "effects", "role", "roles", "via", "toward", "towards",
+}
+_TOKEN_RE = re.compile(r"[a-z]{4,}|[\u4e00-\u9fff]{2,}")
+
+
+def _topic_tokens(terms: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for term in terms:
+        for token in _TOKEN_RE.findall(str(term or "").lower()):
+            if token in _STOPWORDS:
+                continue
+            tokens.add(token)
+    return tokens
+
+
 def ingest_search_results(
     query: str,
     max_results: int,
@@ -111,10 +176,12 @@ def ingest_search_results(
     settings: Settings | None = None,
     dimensions: list[str] | None = None,
     fixed_queries: list[str] | None = None,
+    topic_terms: list[str] | None = None,
 ) -> dict[str, Any]:
     """LLM/专项 skill 规划检索式 → 逐篇下载 PDF → 清洗 → 入库。
 
     fixed_queries 提供时不再调用 LLM 规划，直接执行给定检索式。
+    topic_terms 提供时先过领域相关性硬门，跨域命中直接丢弃并记入报告。
     """
     settings = settings or default_settings
     api = api or ApiHub()
@@ -140,7 +207,9 @@ def ingest_search_results(
                 break
         if not records:
             records = api.search(query, max_results=max_results)
-        return _process_records(
+        gate_terms = list(topic_terms or []) or [query, *(dimensions or [])]
+        records, dropped = apply_topic_relevance_gate(records, gate_terms)
+        out = _process_records(
             records,
             retriever=retriever,
             api=api,
@@ -148,6 +217,18 @@ def ingest_search_results(
             query=query,
             queries=queries,
         )
+        if dropped:
+            out["relevance_gate"] = {
+                "dropped": len(dropped),
+                "topics": gate_terms[:6],
+                "examples": [
+                    {"paper_key": d.get("paper_key"), "title": d.get("title")}
+                    for d in dropped[:5]
+                ],
+            }
+            log_event(conn, "retrieval", "relevance-gate-dropped", None,
+                      out["relevance_gate"])
+        return out
     finally:
         if own_conn:
             conn.close()

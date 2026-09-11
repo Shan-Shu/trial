@@ -20,16 +20,18 @@ from research_agent.dashboard import api as dbapi
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app(db_path: str | Path | None = None) -> FastAPI:
-    """构建看板应用。db_path 缺省用 config.Settings.db_path。"""
+def create_app(db_path: str | Path | None = None,
+               inject_llms: bool = True) -> FastAPI:
+    """构建看板应用；生产默认注入四个 DeepSeek V4 Pro 研究模型。"""
     _db = str(db_path) if db_path else str(default_settings.db_path)
 
     app = FastAPI(
         title="research-agent 看板",
         description="动态本体图谱 + 智能体工作状态 + 输入输出",
-        version="0.3.1",
+        version="0.4.0",
     )
     app.state.db_path = _db
+    app.state.inject_llms = bool(inject_llms)
 
     @app.get("/api/health")
     def health(request: Request) -> dict:
@@ -73,7 +75,11 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             return {"ok": False, "error": "指令为空"}
         db_path = payload.get("db") or request.app.state.db_path
         try:
-            result = dbapi.run_planner_request(text, db_path)
+            model = None
+            if app.state.inject_llms:
+                from research_agent.models import build_role_model
+                model = build_role_model("planner")
+            result = dbapi.run_planner_request(text, db_path, model=model)
             return {"ok": True, **result}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
@@ -81,7 +87,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     @app.post("/api/study/run")
     def study_run(payload: dict = Body(...),
                   request: Request = None) -> dict:
-        """后台启动一次确定性研究流程，便于在指令台发送完整任务。"""
+        """后台启动一次 Planner-first 研究流程，生产环境注入真实 LLM。"""
         text = str(payload.get("request") or "").strip()
         if not text:
             return {"ok": False, "error": "指令为空"}
@@ -96,9 +102,35 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
 
             try:
                 settings = Settings(db_path=Path(db_path))
+                if app.state.inject_llms:
+                    from research_agent.models import build_role_model
+                    from research_agent.pipeline import Services as PipelineServices
+                    from research_agent.retrieval.api_clients import ApiHub
+                    from research_agent.study.collection import collect_mission
+
+                    pipeline_services = PipelineServices(
+                        api=ApiHub(source="fulltext"),
+                        retriever_model=build_role_model("retriever"),
+                        quality_model=build_role_model("quality"),
+                        knowledge_model=build_role_model("knowledge"),
+                        settings=settings,
+                    )
+                    collector = lambda req: collect_mission(
+                        req, services=pipeline_services)
+                    services = StudyServices(
+                        planner_model=build_role_model("planner"),
+                        consumer_model=build_role_model("consumer"),
+                        content_model=build_role_model("content"),
+                        review_model=build_role_model("review"),
+                        fact_check_model=build_role_model("fact_check"),
+                        settings=settings,
+                        collector=collector,
+                    )
+                else:
+                    services = StudyServices(settings=settings)
                 run_study(
                     text,
-                    StudyServices(settings=settings),
+                    services,
                     max_results_override=None,
                 )
             except Exception as exc:  # noqa: BLE001

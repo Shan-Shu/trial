@@ -130,7 +130,23 @@ moderator, mediator, outcome, comparison, location, time, evidence。
     这类“结论性陈述”应表达为 relation/event 的 evidence，而不是事件本身。
 12. involves 关系克制使用：event.participants 仅列直接参与该事件的关键实体（≤5 个），
     仅在确有参与关系时给出；不要把同句共现的无关概念全部拉成 participants，
-    避免 involves 变成笼统的“共现”关系。"""
+    避免 involves 变成笼统的“共现”关系。
+13. conditions / measurements 必须真的填写，不允许留空数组：只要原文出现任何可量化的
+    做法、配方、参数或结果，就必须落到 conditions 或 measurements 里。
+    - 化学/材料/实验类超边（procedure、causal_relation、observation）
+      必须给出 conditions：temperature(°C)、duration(h/min)、solvent、catalyst、
+      ligand、additive、base、atmosphere、equivalent、mol%、concentration、pH、
+      pressure、setting；有产率/选择性/性能数字时必须给出 measurements。
+    - 评测/社科/生物医学类超边必须给出 measurements：accuracy、effect_size、p_value、
+      frequency、score、sample_size、coverage、period 等。
+    - conditions 用 {"key","operator","value","unit"}：key 用上面的标准键；
+      operator 用 = / > / < / between / described_as；
+      value 写原文数值或名称（如 "80" 或 "toluene"），unit 写单位或 null。
+    - measurements 用 {"metric","value","unit","qualifier"}：value 写原文数值，
+      qualifier 可写测定条件（如 "isolated"、"NMR"、"per 100 g"）。
+    - 例子：80 °C、12 h、5 mol% Pd(PPh3)4、2.0 equiv Cs2CO3、toluene、under argon、
+      收率 87%、ee 94%、dr > 20:1、p < 0.01、n = 120。
+    - 严禁把上面这些数字塞进 attributes 或不写；conditions/measurements 空着等于丢数据。"""
 
 
 REPORTING_PHRASE_PREFIXES = [
@@ -437,7 +453,43 @@ def flag_issues(data: dict[str, Any], min_conf: float = 0.6,
         if c < min_conf:
             tr = str(ev.get("trigger") or "")[:60]
             issues.append(f"事件[{i}] 「{tr}」置信度偏低({c})")
+    _flag_missing_quantities(data, issues)
     return issues[: max(0, int(max_items))]
+
+
+# 出现这些线索说明原文里有可量化信息，conditions/measurements 不该为空
+_QUANTITY_HINTS = (
+    "°c", "℃", " mol%", "mol %", " equiv", " h ", " min", "toluene", "thf",
+    "dcm", "dce", "dmf", "dioxane", "yield", "收率", "产率", "%", "ee", "dr ",
+    "p <", "p =", "p=", "n =", "n=", "小时", "当量", "催化剂", "溶剂", "温度",
+)
+
+
+def _flag_missing_quantities(data: dict[str, Any], issues: list[str]) -> None:
+    """超边有量化线索但没有 conditions/measurements 时，点名要求补填。"""
+    for i, h in enumerate(data.get("hyperedges") or []):
+        if not isinstance(h, dict):
+            continue
+        conditions = h.get("conditions") or []
+        measurements = h.get("measurements") or []
+        if conditions and measurements:
+            continue
+        blob = " ".join([
+            str(h.get("label") or ""), str(h.get("evidence") or ""),
+            " ".join(str(m.get("name") or "") for m in h.get("members") or []
+                     if isinstance(m, dict)),
+        ]).lower()
+        if not any(hint in blob for hint in _QUANTITY_HINTS):
+            continue
+        missing = []
+        if not conditions:
+            missing.append("conditions")
+        if not measurements:
+            missing.append("measurements")
+        issues.append(
+            f"超边[{i}] 「{str(h.get('label') or '')[:50]}」含可量化信息但 "
+            f"{'/'.join(missing)} 为空（SCHEMA #13）：请从原文抽出温度/时间/溶剂/"
+            f"催化剂/当量/产率/选择性并补齐；数值必须来自原文")
 
 
 REFINE_PROMPT = """你正在对一次知识抽取结果做“定向精修”（科研知识抽取流水线的反思环节，第二遍）。
@@ -462,7 +514,9 @@ REFINE_PROMPT = """你正在对一次知识抽取结果做“定向精修”（�
      禁止把不同配方并入泛称造成细节丢失；
    - related_to 等兜底关系若能落到更具体关系 → 替换为具体关系；
    - 置信度偏低 → 确为原文直接陈述则提高并保留 evidence；确为推断则如实标低置信或删除；
-   - 同一概念与库中规范名不一致 → 改为规范名并补 aliases。
+   - 同一概念与库中规范名不一致 → 改为规范名并补 aliases；
+   - conditions/measurements 为空但原文有温度、时间、溶剂、催化剂、当量、产率、
+     选择性、p 值等数字 → 按 SCHEMA 第 13 条补齐，数值必须来自原文。
 4. 没有可改进项时：原样输出首遍 JSON（不增删改任何字符），并在 JSON 之后另起一行输出：
    I am done
 5. 只输出精修后的 JSON 对象；不要代码块、不要解释、不要额外文字

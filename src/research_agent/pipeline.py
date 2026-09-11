@@ -131,8 +131,12 @@ def run_topic(query: str, max_results: int = 3, services: Services | None = None
               conn: sqlite3.Connection | None = None,
               dimensions: list[str] | None = None,
               domain_profile: dict | None = None,
-              fixed_queries: list[str] | None = None) -> dict[str, Any]:
-    """完整流程：检索批量入库 → 逐篇 质量评估+知识提取。返回检索报告与逐篇结果。"""
+              fixed_queries: list[str] | None = None,
+              topic_terms: list[str] | None = None) -> dict[str, Any]:
+    """完整流程：检索批量入库 → 逐篇 质量评估+知识提取。返回检索报告与逐篇结果。
+
+    topic_terms 提供时启用领域相关性硬门，跨域命中不入库。
+    """
     services = services or Services()
     s = services.settings
     own = conn is None
@@ -141,7 +145,8 @@ def run_topic(query: str, max_results: int = 3, services: Services | None = None
         ingest = ingest_search_results(
             query, max_results, api=services.api,
             model=services.retriever_model, conn=db, settings=s,
-            dimensions=dimensions, fixed_queries=fixed_queries)
+            dimensions=dimensions, fixed_queries=fixed_queries,
+            topic_terms=topic_terms)
         keys = ingest["paper_keys"]
         per_paper = process_papers(keys, services, db,
                                    domain_profile=domain_profile) if keys else []

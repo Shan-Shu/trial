@@ -258,7 +258,14 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                            if isinstance(x, dict)]
     hyperedge_payloads: list[dict[str, Any]] = []
     if explicit_hyperedges:
-        hyperedge_payloads.extend(explicit_hyperedges)
+        # 显式超边：conditions/measurements 必须原样透传。此前这里只用
+        # hyperedge_payloads.extend(...) 的原始 dict，键名保持模型输出，
+        # 但下面的构建循环会把缺失字段补成空数组，因此不能丢键。
+        for h in explicit_hyperedges:
+            payload = dict(h)
+            payload.setdefault("conditions", [])
+            payload.setdefault("measurements", [])
+            hyperedge_payloads.append(payload)
     else:
         # Compatibility adapter: old relation/event output is projected into hyperedges
         # without creating Reaction/Event nodes.
@@ -272,6 +279,8 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                     {"name": r.get("subject"), "role": "subject"},
                     {"name": r.get("object"), "role": "object"},
                 ],
+                "conditions": r.get("conditions") or [],
+                "measurements": r.get("measurements") or [],
                 "confidence": r.get("confidence", 0.5),
                 "evidence": r.get("evidence"),
                 "attributes": {"relation_type": r.get("type")},
@@ -279,6 +288,12 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         for ev in data.get("events") or []:
             if not isinstance(ev, dict):
                 continue
+            conditions = list(ev.get("conditions") or [])
+            if ev.get("time") is not None and not any(
+                    str(c.get("key") or c.get("condition_key") or "") == "time"
+                    for c in conditions if isinstance(c, dict)):
+                conditions.append({"key": "time", "operator": "described_as",
+                                   "value": ev.get("time"), "unit": None})
             hyperedge_payloads.append({
                 "type": "event",
                 "label": str(ev.get("trigger") or "event"),
@@ -286,8 +301,8 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                     {"name": name, "role": "participant"}
                     for name in (ev.get("participants") or [])
                 ],
-                "conditions": ({"time": ev.get("time")}
-                               if ev.get("time") is not None else {}),
+                "conditions": conditions,
+                "measurements": ev.get("measurements") or [],
                 "confidence": ev.get("confidence", 0.5),
                 "evidence": ev.get("evidence"),
                 "attributes": ev.get("attributes") or {},
