@@ -17,6 +17,7 @@ from research_agent.study.content import make_content_node
 from research_agent.study.graph import StudyServices, build_study_graph
 from research_agent.study.planner import make_planner_node
 from research_agent.study.reviewer import make_review_node
+from tests._tmpdir import make_temp_dir
 
 
 def seed_single_pattern(path: Path) -> str:
@@ -56,7 +57,7 @@ def seed_single_pattern(path: Path) -> str:
 
 class StudyNodesTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "study.db"
         self.settings = Settings(db_path=self.db)
         seed_single_pattern(self.db)
@@ -114,6 +115,13 @@ class StudyNodesTest(unittest.TestCase):
         self.assertEqual(out["status"], "planned")
         self.assertEqual(out["plan"]["content_type"], "frontier_review")
         self.assertEqual(len(out["plan"]["mission"]["seed_terms"]), 2)
+        self.assertTrue(out["plan"]["retrieval_plan"]["query_variants"])
+        self.assertEqual(
+            out["plan"]["retrieval_plan"]["query_variants"],
+            out["plan"]["mission"]["seed_terms"],
+        )
+        self.assertIn("dimensions", out["plan"]["analysis_plan"])
+        self.assertTrue(out["plan"]["evidence_policy"]["traceability_required"])
 
         consumer = make_knowledge_consumer_node(
             conn=self.conn, settings=self.settings)
@@ -174,7 +182,7 @@ class StudyNodesTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_consumer_calls_collector_then_remines(self):
+    def test_collection_is_planner_first_and_consumer_consumes_result(self):
         empty = Path(self.tmp.name) / "backfill.db"
         settings = Settings(db_path=empty)
         conn = connect(empty)
@@ -208,31 +216,116 @@ class StudyNodesTest(unittest.TestCase):
             return {"count": 1}
 
         try:
-            node = make_knowledge_consumer_node(
-                conn=conn, settings=settings, collector=fake_collector)
-            out = node({"plan": {
-                "goal": "补集测试",
-                "domain": "backfill",
-                "content_type": "research_report",
-                "mission": {
-                    "seed_terms": ["backfill"],
-                    "max_results": 3,
-                    "min_confidence": 0.6,
-                    "collection_mode": "broad",
-                },
-            }})
-            self.assertEqual(out["status"], "consumed")
+            graph = build_study_graph(
+                StudyServices(settings=settings, collector=fake_collector),
+                conn=conn,
+            )
+            out = graph.invoke({"request": "补集测试", "review_rounds": 0})
             self.assertEqual(len(calls), 1)
-            self.assertEqual(
-                len([p for p in out["knowledge"]["patterns"]
-                     if "BackfillMethod" in p["title"]]), 1)
+            self.assertIn("BackfillMethod", {
+                p["source_name"] for p in out["knowledge"]["patterns"]})
+            self.assertGreaterEqual(out.get("collection_rounds", 0), 1)
+            self.assertTrue(calls[0].get("retrieval_plan"))
         finally:
             conn.close()
+
+    def test_llm_consumer_builds_design_context_and_filters_invalid_refs(self):
+        class FakeConsumer:
+            def invoke(self, messages, **kwargs):
+                return AIMessage(content=json.dumps({
+                    "summary": "RAG 由检索与生成模块组成。",
+                    "mechanism_clusters": [{
+                        "name": "retrieval-generation",
+                        "evidence_ids": ["E-0001-1", "E-9999-1"],
+                    }],
+                    "known_conflicts": [],
+                    "evidence_gaps": [],
+                    "retrieval_requests": [],
+                    "design_context": {
+                        "mechanism_states": [{
+                            "state_id": "MS-0001",
+                            "intermediate": "vinyl cation",
+                            "evidence_ids": ["E-0001-1"],
+                        }],
+                        "reaction_primitives": [],
+                        "opportunity_gaps": [],
+                        "operator_candidates": [{
+                            "op_id": "OP-0001",
+                            "operator_chain": [
+                                {"operator": "polarity_reversal",
+                                 "input": "RAG query", "output": "retrieved context"},
+                            ],
+                            "evidence_ids": ["E-0001-1"],
+                        }],
+                        "constraint_conflicts": [],
+                    },
+                    "confidence": 0.82,
+                }, ensure_ascii=False))
+
+        node = make_knowledge_consumer_node(
+            conn=self.conn, settings=self.settings, model=FakeConsumer())
+        out = node({"plan": {
+            "goal": "分析 RAG 机制",
+            "domain": "RAG",
+            "mission": {"seed_terms": ["RAG"]},
+            "retrieval_plan": {"query_variants": ["RAG"]},
+        }})
+        self.assertEqual(out["status"], "consumed")
+        analysis = out["knowledge"]["consumer_analysis"]
+        self.assertEqual(analysis["consumer_mode"], "llm")
+        # 形状正确但不存在的编号才算非法引用
+        self.assertIn("E-9999-1", analysis["invalid_references"])
+        refs = analysis["mechanism_clusters"][0]["evidence_ids"]
+        self.assertEqual(refs, ["E-0001-1"])
+        design = out["knowledge"]["design_context"]
+        self.assertTrue(design["mechanism_states"])
+        self.assertEqual(design["mechanism_states"][0]["state_id"], "MS-0001")
+        self.assertTrue(design["mechanism_states"][0]["traceable"])
+        self.assertEqual(design["operator_candidates"][0]["operator_chain"][0]["operator"],
+                         "polarity_reversal")
+
+    def test_consumer_keeps_descriptive_text_out_of_id_fields(self):
+        """描述性文字被放进 *ids 字段时不应被静默删除，而应回收到 notes。"""
+        class FakeConsumer:
+            def invoke(self, messages, **kwargs):
+                return AIMessage(content=json.dumps({
+                    "summary": "机制摘要",
+                    "mechanism_clusters": [],
+                    "known_conflicts": [],
+                    "evidence_gaps": [],
+                    "retrieval_requests": [],
+                    "design_context": {
+                        "operator_candidates": [{
+                            "op_id": "OP-0001",
+                            "operator_chain": [
+                                {"operator": "polarity_reversal",
+                                 "input": "ynamide", "output": "nucleophilic carbon"},
+                            ],
+                            "evidence_ids": [
+                                "将 N-sulfonyl ynamide 的 DKR 与 (5+1)-annulation 结合",
+                            ],
+                        }],
+                    },
+                    "confidence": 0.5,
+                }, ensure_ascii=False))
+
+        node = make_knowledge_consumer_node(
+            conn=self.conn, settings=self.settings, model=FakeConsumer())
+        out = node({"plan": {
+            "goal": "机制分析",
+            "domain": "chemistry",
+            "mission": {"seed_terms": ["ynamide"]},
+            "retrieval_plan": {"query_variants": ["ynamide"]},
+        }})
+        analysis = out["knowledge"]["consumer_analysis"]
+        self.assertEqual(analysis["invalid_references"], [])
+        self.assertTrue(analysis["unattributed_notes"])
+        self.assertIn("DKR", analysis["unattributed_notes"][0])
 
 
 class StudyLlmParsingTest(unittest.TestCase):
     def test_content_llm_parse_and_review(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "llm.db"
         self.settings = Settings(db_path=self.db)
         seed_single_pattern(self.db)

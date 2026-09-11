@@ -25,6 +25,7 @@ from research_agent.quality.scoring import (
     quality_assess,
 )
 from research_agent.retrieval.pdf_cleaner import clean_pdf
+from tests._tmpdir import make_temp_dir
 
 
 def make_pdf_bytes(pages: list[list[str]]) -> bytes:
@@ -133,7 +134,7 @@ class PreprocessTest(unittest.TestCase):
 
 class OntologyStoreTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.conn = connect(Path(self.tmp.name) / "o.db")
         ont.init_ontology(self.conn)
 
@@ -174,7 +175,7 @@ class OntologyStoreTest(unittest.TestCase):
 
 class RetrievalIngestTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "t.db"
 
     def tearDown(self):
@@ -240,7 +241,7 @@ class QualityScoringTest(unittest.TestCase):
 
 class KnowledgeExtractionTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "k.db"
         self.conn = connect(self.db)
         ont.init_ontology(self.conn)
@@ -293,7 +294,7 @@ class KnowledgeExtractionTest(unittest.TestCase):
 
 class PipelineEndToEndTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "pipeline.db"
 
     def tearDown(self):

@@ -32,7 +32,8 @@ class DomainProfileTest(unittest.TestCase):
         self.assertTrue(any("组合" in op for op in
                             plan["creative_contract"]["creative_operations"]))
 
-    def test_deterministic_generative_draft_passes_review(self):
+    def test_low_level_draft_is_rejected_by_review(self):
+        """无算子链的低阶候选必须被审核拦下（这是 v0.4.1 的核心回归点）。"""
         plan = deterministic_plan("提出一个新的数据分析框架")
         knowledge = {
             "patterns": [
@@ -53,9 +54,70 @@ class DomainProfileTest(unittest.TestCase):
             ],
         }
         draft = deterministic_draft(plan, knowledge)
-        self.assertGreaterEqual(len(draft.get("strategies") or []), 3)
+        self.assertGreaterEqual(len(draft.get("strategies") or []), 1)
         review = deterministic_review(plan, draft, knowledge)
-        self.assertEqual(review["decision"], "pass")
+        self.assertEqual(review["decision"], "revise")
+        requirements = review["instruction_compliance"]["requirements"]
+        design = [r for r in requirements if r.get("category") == "design"]
+        self.assertTrue(design, "生成型任务必须产生设计契约检查项")
+        failed = {r["requirement"] for r in design if r["status"] != "met"}
+        self.assertTrue(
+            any(("创新等级" in item) or ("核心创新标签" in item) for item in failed),
+            f"低阶候选必须被判不达标，实际 failed={failed}")
+        self.assertTrue(any("算子链" in r["requirement"] for r in design))
+
+    def test_design_context_operator_chain_reaches_high_level(self):
+        """有机制状态与算子链时，候选应达到创新等级下限并携带算子链。"""
+        plan = deterministic_plan("提出一种炔酰胺构建多元氮杂环的新方法")
+        knowledge = {
+            "patterns": [],
+            "evidence": [],
+            "hyperedges": [],
+            "design_context": {
+                "mechanism_states": [{
+                    "state_id": "MS-0001",
+                    "label": "copper-catalyzed cyclization of ynamide to vinyl cation",
+                    "start_state": "N-propargyl ynamide",
+                    "activation_mode": "π-acid / carbophilic activation",
+                    "intermediate": "vinyl cation",
+                    "bond_changes": ["C-N formation"],
+                    "selectivity_control": "chiral ligand control",
+                    "known_side_reactions": [],
+                    "evidence_ids": ["E-2033-1"],
+                    "hyperedge_ids": ["H-2033"],
+                    "confidence": 0.6,
+                }],
+                "operator_candidates": [{
+                    "op_id": "OP-0001",
+                    "target": "N-propargyl ynamide",
+                    "operator_chain": [
+                        {"operator": "polarity_reversal",
+                         "input": "ynamide beta-carbon", "output": "nucleophilic carbon"},
+                        {"operator": "intermediate_capture",
+                         "input": "nucleophilic carbon", "output": "vinyl cation trapped ring"},
+                        {"operator": "selectivity_lock",
+                         "input": "vinyl cation trapped ring", "output": "single enantiomer"},
+                    ],
+                    "evidence_ids": ["E-2033-1"],
+                    "hyperedge_ids": ["H-2033"],
+                }],
+            },
+        }
+        draft = deterministic_draft(plan, knowledge)
+        strategies = draft["strategies"]
+        self.assertTrue(strategies)
+        levels = {s.get("innovation_level") for s in strategies}
+        self.assertTrue(levels & {"L3", "L4"}, f"等级应达到 L3+，实际 {levels}")
+        self.assertTrue(all(s.get("operator_chain") for s in strategies))
+        review = deterministic_review(plan, draft, knowledge)
+        design = [r for r in review["instruction_compliance"]["requirements"]
+                  if r.get("category") == "design"]
+        floor_checks = [r for r in design if "创新等级" in r["requirement"]]
+        self.assertTrue(floor_checks, "必须存在创新等级检查项")
+        self.assertIn("达到", floor_checks[0]["requirement"])
+        low_level_check = [r for r in design if "核心创新标签" in r["requirement"]]
+        self.assertTrue(low_level_check)
+        self.assertEqual(low_level_check[0]["status"], "met")
 
     def test_normalize_profile_falls_back(self):
         p = normalize_domain_profile(

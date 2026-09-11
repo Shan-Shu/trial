@@ -13,6 +13,7 @@ from research_agent.retrieval.ncpssd import (
     build_combined_query,
     build_search_query,
 )
+from tests._tmpdir import make_temp_dir
 
 
 def _row(title: str = "人民战争中的群众伟力", row_id: str = "12345") -> dict:
@@ -121,8 +122,8 @@ class ApiHubNcpssdTest(unittest.TestCase):
 
 class PaperCitationColumnsTest(unittest.TestCase):
     def test_volume_issue_pages_keywords_columns_are_not_shifted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            db = connect(Path(tmp) / "t.db")
+        with make_temp_dir() as tmpdir:
+            db = connect(Path(tmpdir.name) / "t.db")
             rec = {
                 "paper_key": "ncpssd:123",
                 "source": "ncpssd",

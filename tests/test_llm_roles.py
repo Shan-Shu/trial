@@ -9,7 +9,9 @@ from research_agent.config import Settings
 from research_agent.db import connect, get_paper, get_quality_result, upsert_paper
 from research_agent.quality.node import make_quality_node
 from research_agent.retrieval.node import ingest_search_results
+from research_agent.models import ROLE_KEY_ENV, ROLE_MODEL_DEFAULT, ROLE_PROVIDER
 from research_agent.role_fakes import FakeQualityModel, FakeRetrieverModel
+from tests._tmpdir import make_temp_dir
 
 
 def tiny_pdf() -> bytes:
@@ -59,9 +61,18 @@ def rec_for(key: str, title: str, **kw) -> dict:
     return rec
 
 
+class StudyRoleBindingTest(unittest.TestCase):
+    def test_study_roles_use_deepseek_v4_pro_and_same_key(self):
+        for role in ("planner", "consumer", "content", "review"):
+            self.assertEqual(ROLE_PROVIDER[role], "deepseek")
+            self.assertEqual(ROLE_MODEL_DEFAULT[role], "deepseek-v4-pro")
+            self.assertEqual(ROLE_KEY_ENV[role], "DEEPSEEK_API_KEY")
+
+
+
 class LlmRoleRetrieverTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "ret.db"
 
     def tearDown(self):
@@ -91,7 +102,7 @@ class LlmRoleRetrieverTest(unittest.TestCase):
 
 class LlmRoleQualityTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "q.db"
         self.conn = connect(self.db)
         rec = rec_for(

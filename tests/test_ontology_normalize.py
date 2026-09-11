@@ -7,11 +7,12 @@ from pathlib import Path
 
 from research_agent.db import connect
 from research_agent.ontology import store as ont
+from tests._tmpdir import make_temp_dir
 
 
 class OntologyNormalizeTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.conn = connect(Path(self.tmp.name) / "norm.db")
         ont.init_ontology(self.conn)
 

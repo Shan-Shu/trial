@@ -24,6 +24,101 @@ from research_agent.retrieval.skills import (
 )
 from research_agent.study.content import make_content_node
 from research_agent.study.planner import deterministic_plan
+from tests._tmpdir import make_temp_dir
+
+
+class TopicRelevanceGateTest(unittest.TestCase):
+    """语料卫生：跨域命中不得进入知识库（v0.4.1）。"""
+
+    def setUp(self):
+        from research_agent.retrieval.node import apply_topic_relevance_gate
+
+        self.gate = apply_topic_relevance_gate
+
+    def test_cross_domain_record_is_dropped(self):
+        kept, dropped = self.gate([
+            {"paper_key": "a", "title": "Ynamide annulation to nitrogen heterocycles",
+             "abstract": "Copper-catalyzed annulation of ynamides gives azacycles."},
+            {"paper_key": "b", "title": "PEGylated liposomal doxorubicin in mice",
+             "abstract": "Stealth liposomes avoid the reticuloendothelial system."},
+        ], ["ynamide annulation", "ynamide nitrogen heterocycle synthesis"])
+        keys = [r["paper_key"] for r in kept]
+        self.assertIn("a", keys)
+        self.assertNotIn("b", keys)
+        self.assertEqual([r["paper_key"] for r in dropped], ["b"])
+
+    def test_short_abstract_is_not_gated(self):
+        kept, dropped = self.gate([
+            {"paper_key": "c", "title": "Short", "abstract": "tiny"},
+        ], ["ynamide annulation"])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped, [])
+
+    def test_no_topic_terms_means_no_gate(self):
+        kept, dropped = self.gate([
+            {"paper_key": "d", "title": "Anything at all",
+             "abstract": "Some reasonably long abstract text goes here."},
+        ], None)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped, [])
+
+    def test_chinese_topics_match(self):
+        kept, _ = self.gate([
+            {"paper_key": "e", "title": "炔酰胺构建多元氮杂环的新方法",
+             "abstract": "本文报道炔酰胺参与的多组分环化反应。"},
+        ], ["炔酰胺", "多元氮杂环"])
+        self.assertEqual(len(kept), 1)
+
+    def test_ingest_reports_gate_result(self):
+        from research_agent.retrieval.node import ingest_search_results
+
+        class FakeApi:
+            def search(self, query, max_results=5):
+                return [
+                    {"paper_key": "x1", "source": "fake",
+                     "title": "Ynamide annulation to azacycles",
+                     "abstract": "Copper-catalyzed annulation of ynamides.",
+                     "authors": []},
+                    {"paper_key": "x2", "source": "fake",
+                     "title": "Malaria vaccine trial in children",
+                     "abstract": "A randomized trial of a malaria vaccine candidate."},
+                ]
+
+            def enrich(self, rec):
+                return dict(rec)
+
+            def download_pdf(self, rec):
+                return None
+
+        with make_temp_dir() as tmp:
+            db = Path(tmp.name) / "gate.db"
+            out = ingest_search_results(
+                "ynamide annulation", 5, api=FakeApi(),
+                settings=Settings(db_path=db), topic_terms=["ynamide annulation"])
+            self.assertEqual(out["paper_keys"], ["x1"])
+            self.assertEqual(out["relevance_gate"]["dropped"], 1)
+
+    def test_content_and_reviewer_deterministic_path(self):
+        from research_agent.study.consumer import make_knowledge_consumer_node
+        from research_agent.study.content import make_content_node
+        from research_agent.study.reviewer import make_review_node
+
+        with make_temp_dir() as tmp:
+            db = Path(tmp.name) / "plain.db"
+            conn = connect(db)
+            ont.init_ontology(conn)
+            try:
+                plan = {
+                    "goal": "测试目标", "domain": "RAG",
+                    "content_type": "frontier_review",
+                    "mission": {"seed_terms": ["RAG"]},
+                }
+                consumed = make_knowledge_consumer_node(
+                    conn=conn, settings=Settings(db_path=db))({"plan": plan})
+                drafted = make_content_node(None)(consumed)
+                self.assertEqual(drafted["status"], "drafted")
+            finally:
+                conn.close()
 
 
 class RetrievalSkillsControlTest(unittest.TestCase):
@@ -116,7 +211,7 @@ class RetrievalSkillsControlTest(unittest.TestCase):
         self.assertEqual([g["pattern_id"] for g in gaps], ["P-1"])
 
     def test_dictionary_merge_repoints_edges(self):
-        tmp = tempfile.TemporaryDirectory()
+        tmp = make_temp_dir()
         path = Path(tmp.name) / "merge.db"
         conn = connect(path)
         ont.init_ontology(conn)
@@ -214,7 +309,7 @@ class RetrievalSkillsControlTest(unittest.TestCase):
         self.assertNotEqual(bad["decision"], "pass")
 
     def test_hyperedge_keeps_roles_conditions_measurements_without_event_node(self):
-        tmp = tempfile.TemporaryDirectory()
+        tmp = make_temp_dir()
         path = Path(tmp.name) / "hyperedge.db"
         conn = connect(path)
         ont.init_ontology(conn)
@@ -267,7 +362,7 @@ class RetrievalSkillsControlTest(unittest.TestCase):
             tmp.cleanup()
 
     def test_cleanup_local_reference_labels_and_rename_with_alias(self):
-        tmp = tempfile.TemporaryDirectory()
+        tmp = make_temp_dir()
         path = Path(tmp.name) / "labels.db"
         conn = connect(path)
         ont.init_ontology(conn)
@@ -295,7 +390,7 @@ class RetrievalSkillsControlTest(unittest.TestCase):
             tmp.cleanup()
 
     def test_maybe_global_merge_threshold(self):
-        tmp = tempfile.TemporaryDirectory()
+        tmp = make_temp_dir()
         path = Path(tmp.name) / "threshold.db"
         conn = connect(path)
         ont.init_ontology(conn)

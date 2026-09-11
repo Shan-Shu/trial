@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from research_agent.db import connect, log_event, save_quality_result, upsert_paper
 from research_agent.ontology import store as ont
+from tests._tmpdir import make_temp_dir
 
 
 def seed_db(path: Path) -> None:
@@ -56,12 +57,12 @@ def seed_db(path: Path) -> None:
 
 class DashboardApiTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = make_temp_dir()
         self.db = Path(self.tmp.name) / "dash.db"
         seed_db(self.db)
         from research_agent.dashboard.app import create_app
 
-        self.client = TestClient(create_app(self.db))
+        self.client = TestClient(create_app(self.db, inject_llms=False))
 
     def tearDown(self):
         self.tmp.cleanup()
