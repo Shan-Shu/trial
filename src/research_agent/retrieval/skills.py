@@ -456,13 +456,24 @@ def build_skill_request(plan: dict[str, Any] | None,
     """把 planner/content 状态翻译成 retrieval node 可消费的 skill request。"""
     plan = plan or {}
     mission = plan.get("mission") or {}
+    retrieval_plan = plan.get("retrieval_plan") or {}
     retrieval = normalize_retrieval(plan, str(plan.get("goal") or ""))
+    seed_terms = retrieval_plan.get("query_variants") or mission.get("seed_terms") or []
     request: dict[str, Any] = {
-        "reason": "证据缺口反向检索或单领域精深检索",
-        "seed_terms": mission.get("seed_terms") or [],
-        "max_results": int(mission.get("max_results") or 80),
-        "min_confidence": float(mission.get("min_confidence") or 0.6),
+        "reason": "执行 Planner 生成的检索计划",
+        "seed_terms": seed_terms,
+        "max_results": int(
+            retrieval_plan.get("max_results_per_query")
+            or mission.get("max_results") or 80),
+        "min_confidence": float(
+            retrieval_plan.get("min_quality")
+            or mission.get("min_confidence") or 0.6),
         "domain_profile": plan.get("domain_profile"),
+        "retrieval_plan": retrieval_plan,
+        "budget": plan.get("budget") or {},
+        "dimensions": retrieval_plan.get("dimensions") or [],
+        "source_mix": retrieval_plan.get("source_mix") or [],
+        "stop_conditions": retrieval_plan.get("stop_conditions") or [],
         "retrieval": retrieval,
         "suggested_route": "retrieval -> quality -> knowledge",
     }
