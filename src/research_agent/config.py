@@ -86,6 +86,17 @@ class Settings:
     http_timeout: int = 30
     user_agent: str = "research-agent/0.1 (mailto:research@example.com)"
 
+    # ---------- 研究任务节点超时（v0.4.1） ----------
+    # 实测：推理型模型在长结构化输出上可能要 6 分钟以上才返回，也不保证一定返回；
+    # 超时后节点降级为确定性实现，避免整条研究链路被单个请求拖死。
+    study_consumer_timeout: int = 900   # 知识消费节点（秒）
+    study_content_timeout: int = 900    # 内容形成节点（秒）
+    study_review_timeout: int = 600     # 审核节点（秒）
+    study_fact_check_timeout: int = 600  # 事实核查节点（秒）
+    # 审核最大轮数：每轮都会触发一次内容重生成（真实耗时 5-10 分钟），
+    # 综述类任务通常不需要多轮，可用环境变量或入口参数降到 1。
+    study_max_review_rounds: int = 3
+
     # 本地已知期刊分区表（种子样例，可扩展；完整 JCR 数据需授权订阅）
     journal_quartiles_seed: dict = field(default_factory=lambda: {
         "nature": "Q1", "science": "Q1", "cell": "Q1",
@@ -144,6 +155,16 @@ class Settings:
             os.getenv("RA_REFINE_MAX_ATTEMPTS", s.refine_max_attempts))
         s.review_correctness_min = _env_float(
             "RA_REVIEW_CORRECTNESS_MIN", s.review_correctness_min)
+        s.study_consumer_timeout = int(
+            os.getenv("RA_STUDY_CONSUMER_TIMEOUT", s.study_consumer_timeout))
+        s.study_content_timeout = int(
+            os.getenv("RA_STUDY_CONTENT_TIMEOUT", s.study_content_timeout))
+        s.study_review_timeout = int(
+            os.getenv("RA_STUDY_REVIEW_TIMEOUT", s.study_review_timeout))
+        s.study_fact_check_timeout = int(
+            os.getenv("RA_STUDY_FACT_CHECK_TIMEOUT", s.study_fact_check_timeout))
+        s.study_max_review_rounds = int(
+            os.getenv("RA_STUDY_MAX_REVIEW_ROUNDS", s.study_max_review_rounds))
         s.global_merge_enabled = _env_bool("RA_GLOBAL_MERGE", s.global_merge_enabled)
         s.global_merge_interval_nodes = int(os.getenv(
             "RA_GLOBAL_MERGE_INTERVAL_NODES", s.global_merge_interval_nodes))

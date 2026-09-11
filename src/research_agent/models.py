@@ -1,8 +1,8 @@
 """多模型提供商工厂 + “角色 → LLM”绑定。
 
 模型分工约定（用户指定）：
-- 审核校对节点  → GLM 4.7 Flash（glm-4.7-flash，智谱 BigModel）
-- 其余 LLM 节点 → DeepSeek V4 Flash（deepseek-v4-flash）
+- 研究任务节点 Planner/Consumer/Content/Reviewer/FactCheck 统一使用 DeepSeek V4 Pro
+- 数据构建节点继续按各自默认绑定运行
 """
 from __future__ import annotations
 
@@ -28,40 +28,50 @@ ROLE_PROVIDER = {
     "quality": "deepseek",
     "knowledge": "deepseek",
     "planner": "deepseek",
+    "consumer": "deepseek",
     "content": "deepseek",
-    "review": "glm",
+    "review": "deepseek",
+    "fact_check": "deepseek",
 }
 ROLE_MODEL_ENV = {
     "retriever": "RETRIEVAL_MODEL",
     "quality": "QUALITY_MODEL",
     "knowledge": "KNOWLEDGE_MODEL",
     "planner": "PLANNER_MODEL",
+    "consumer": "CONSUMER_MODEL",
     "content": "CONTENT_MODEL",
     "review": "REVIEW_MODEL",
+    "fact_check": "FACT_CHECK_MODEL",
 }
 ROLE_MODEL_DEFAULT = {
     "retriever": "deepseek-v4-flash",
     "quality": "deepseek-v4-flash",
     "knowledge": "deepseek-v4-flash",
-    "planner": "deepseek-v4-flash",
-    "content": "deepseek-v4-flash",
-    "review": "glm-4.7-flash",
+    "planner": "deepseek-v4-pro",
+    "consumer": "deepseek-v4-pro",
+    "content": "deepseek-v4-pro",
+    "review": "deepseek-v4-pro",
+    "fact_check": "deepseek-v4-pro",
 }
 ROLE_KEY_ENV = {
     "retriever": "DEEPSEEK_API_KEY",
     "quality": "DEEPSEEK_API_KEY",
     "knowledge": "DEEPSEEK_API_KEY",
     "planner": "DEEPSEEK_API_KEY",
+    "consumer": "DEEPSEEK_API_KEY",
     "content": "DEEPSEEK_API_KEY",
-    "review": "ZHIPU_API_KEY",
+    "review": "DEEPSEEK_API_KEY",
+    "fact_check": "DEEPSEEK_API_KEY",
 }
 ROLE_LABEL = {
     "retriever": "文献检索节点",
     "quality": "质量控制节点",
     "knowledge": "知识提取节点",
     "planner": "工作规划节点",
+    "consumer": "知识消费节点",
     "content": "内容形成节点",
     "review": "审核校对节点",
+    "fact_check": "事实核查节点",
 }
 
 
@@ -92,15 +102,22 @@ def build_chat_model(
     if provider == "deepseek":
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            model=model_name or os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url="https://api.deepseek.com",
-            temperature=temperature,
-            max_tokens=8000,
-            reasoning_effort=os.getenv("DEEPSEEK_REASONING_EFFORT", "low"),
-            max_retries=5,
-        )
+        kwargs: dict[str, object] = {
+            "model": model_name or os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+            "api_key": os.getenv("DEEPSEEK_API_KEY"),
+            "base_url": "https://api.deepseek.com",
+            "temperature": temperature,
+            "max_tokens": int(os.getenv("DEEPSEEK_MAX_TOKENS", "8000")),
+            "max_retries": 5,
+        }
+        # v0.4.1：默认不再发送 reasoning_effort。
+        # 实测（内容形成节点，6 万字符提示词）显式传 reasoning_effort="low" 时
+        # 请求长时间无响应（>15 分钟），不传该参数时同一提示词约 6 分钟返回。
+        # 需要时可显式设置 DEEPSEEK_REASONING_EFFORT 重新启用。
+        effort = os.getenv("DEEPSEEK_REASONING_EFFORT")
+        if effort:
+            kwargs["reasoning_effort"] = effort
+        return ChatOpenAI(**kwargs)
 
     if provider == "qwen":
         from langchain_openai import ChatOpenAI
@@ -153,9 +170,10 @@ def build_role_model(
 ) -> object:
     """构建“节点角色”绑定的 LLM。
 
-    role: retriever | quality | knowledge。
+    role: retriever | quality | knowledge | planner | consumer | content |
+          review | fact_check。
     默认按 ROLE_PROVIDER/ROLE_MODEL_DEFAULT 绑定目标模型；可用环境变量
-    RETRIEVAL_MODEL / QUALITY_MODEL / KNOWLEDGE_MODEL 覆盖具体 model id。
+    RETRIEVAL_MODEL / QUALITY_MODEL / ... / FACT_CHECK_MODEL 覆盖具体 model id。
     """
     if role not in ROLE_PROVIDER:
         raise ValueError(f"未知角色: {role}，可选: {list(ROLE_PROVIDER)}")

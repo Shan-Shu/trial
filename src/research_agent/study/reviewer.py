@@ -19,21 +19,35 @@ from research_agent.config import Settings, settings as default_settings
 from research_agent.study.content import render_draft
 from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
+from research_agent.study.model_call import invoke_with_timeout
+from research_agent.study.reaction_operators import (
+    INNOVATION_LEVEL_LABEL,
+    INNOVATION_LEVEL_RANK,
+    LOW_LEVEL_OPERATORS,
+    normalize_operator_chain,
+)
 
 logger = logging.getLogger(__name__)
 
 REVIEW_PROMPT = """你是科研内容审核校对节点。你的职责不是补充内容，而是核查草稿是否完成用户指令，并核查证据和引用是否正确。
 
 审核只有两个一级维度，禁止自行增加其他一级评分维度：
-1. instruction_compliance：用户指令符合度，权重 80%。创新性、归纳、总结、证明、格式、数量等要求都放在这里逐项检查；只有用户明确提出创新性时才检查创新性。
+1. instruction_compliance：用户指令符合度，权重 80%。创新性、归纳、总结、证明、格式、数量等要求都放在这里逐项检查；
 2. evidence_correctness：证据与引用正确性，权重 20%。设置 correctness_threshold 最低阈值；低于阈值必须 revise 或 need_more_data。
+
+生成型任务的设计契约检查（design_contract，若有）也放在 instruction_compliance 内逐项判定，
+不要新增一级维度：
+- 每个候选是否给出 operator_chain，且算子名取自给定词表、序列前后衔接；
+- 候选的 innovation_level 是否达到 design_contract.innovation_floor；
+- 候选是否逐条回应 design_contract.target_constraints.hard_constraints；
+- 候选之间是否在 differentiation 上真正不同，而不是同一机制换底物。
 
 给定材料：
 1. user_request：用户原始指令；
 2. instruction_contract：从指令中抽取的硬约束和软约束；
-3. task_plan：规范化任务单；
+3. task_plan：规范化任务单（含 design_contract）；
 4. knowledge：真实的 pattern/evidence/hyperedge 清单；
-5. draft：待审核草稿。
+5. draft：待审核草稿（含 strategies 候选方案与 candidate_pool 统计）。
 
 硬性规则：
 - supported 内容必须至少有一个真实 evidence_id 或 hyperedge_id；
@@ -52,7 +66,7 @@ REVIEW_PROMPT = """你是科研内容审核校对节点。你的职责不是补�
     "requirements": [
       {
         "id": "R1",
-        "category": "content|method|coverage|logic|format|safety",
+        "category": "content|method|coverage|logic|format|safety|design",
         "type": "mandatory|optional",
         "requirement": "可判定的要求",
         "status": "met|partial|unmet|not_applicable",
@@ -156,6 +170,144 @@ def _requirement(rid: str, category: str, requirement: str, status: str,
     }
 
 
+def _design_review(plan: dict[str, Any], draft: dict[str, Any],
+                   rid_start: int) -> tuple[list[dict[str, Any]], int]:
+    """生成型任务的设计契约检查（并入指令符合度，不新增一级维度）。
+
+    检查项全部是代码可判定的硬事实：算子链是否存在且合法、创新等级是否达到
+    下限、硬约束是否被逐条回应、候选之间是否只是同一机制的换底物。
+    """
+    requirements: list[dict[str, Any]] = []
+    contract = plan.get("design_contract") or {}
+    if not contract:
+        return requirements, rid_start
+    strategies = draft.get("strategies") or []
+    rid = rid_start
+    floor = clean_str(contract.get("innovation_floor"), "L3").upper()
+    floor_rank = INNOVATION_LEVEL_RANK.get(floor, 3)
+    min_candidates = max(1, int(contract.get("min_candidates") or 4))
+
+    levels: list[tuple[str, str]] = []
+    chains: dict[str, list[dict[str, Any]]] = {}
+    validations: dict[str, dict[str, Any]] = {}
+    for index, candidate in enumerate(strategies, start=1):
+        title = clean_str(candidate.get("title"), f"候选{index}")
+        chain, validation = normalize_operator_chain(candidate.get("operator_chain"))
+        chains[title] = chain
+        validations[title] = validation
+        declared = validation.get("declared_level", "L0")
+        reported = clean_str(candidate.get("innovation_level"), "").upper()
+        level = reported if reported in INNOVATION_LEVEL_RANK else declared
+        if reported in INNOVATION_LEVEL_RANK and \
+                INNOVATION_LEVEL_RANK[reported] > INNOVATION_LEVEL_RANK[declared]:
+            level = declared  # 不允许自评高于算子链实际等级
+        levels.append((title, level))
+
+    if not strategies:
+        rid += 1
+        requirements.append(_requirement(
+            f"R{rid}", "design", f"至少提出 {min_candidates} 个候选方案", "unmet",
+            "strategies", "草稿未包含任何候选方案", "critical"))
+        return requirements, rid
+
+    rid += 1
+    status = "met" if len(strategies) >= min_candidates else "unmet"
+    requirements.append(_requirement(
+        f"R{rid}", "design", f"至少提出 {min_candidates} 个候选方案", status,
+        "strategies", f"实际 {len(strategies)} 个", "critical"))
+
+    missing_chain = [title for title in chains if not chains[title]]
+    rid += 1
+    requirements.append(_requirement(
+        f"R{rid}", "design", "每个候选都必须给出合法的机制算子链（operator_chain）",
+        "met" if not missing_chain else "unmet", "strategies",
+        f"缺少算子链的候选：{missing_chain}" if missing_chain else "",
+        "critical"))
+
+    breaks = []
+    unknown = []
+    for title, validation in validations.items():
+        if validation.get("unknown_operators"):
+            unknown.append(f"{title}: {validation['unknown_operators']}")
+        if validation.get("chain_breaks"):
+            breaks.append(f"{title}: {len(validation['chain_breaks'])} 处")
+    rid += 1
+    requirements.append(_requirement(
+        f"R{rid}", "design", "算子链必须取自算子词表且前后衔接",
+        "met" if not unknown and not breaks else "unmet", "strategies",
+        f"词表外算子：{unknown}；衔接可疑：{breaks}" if (unknown or breaks) else "",
+        "major"))
+
+    qualified = [title for title, level in levels
+                 if INNOVATION_LEVEL_RANK.get(level, 0) >= floor_rank]
+    need = max(2, min_candidates // 2) if floor_rank >= 3 else 1
+    rid += 1
+    requirements.append(_requirement(
+        f"R{rid}", "design",
+        f"至少 {need} 个候选达到创新等级 {floor}"
+        f"（{INNOVATION_LEVEL_LABEL.get(floor, '')}）",
+        "met" if len(qualified) >= need else "unmet", "strategies",
+        f"达标候选：{qualified or '无'}；各候选等级：{levels}", "critical"))
+
+    low_only = [title for title, level in levels
+                if INNOVATION_LEVEL_RANK.get(level, 0) <= 2]
+    rid += 1
+    requirements.append(_requirement(
+        f"R{rid}", "design", "不得把换底物/组合条件直接作为核心创新标签",
+        "unmet" if len(low_only) == len(levels) else "met", "strategies",
+        f"全部候选都停留在 L1–L2：{low_only}" if len(low_only) == len(levels) else "",
+        "critical" if len(low_only) == len(levels) else "major"))
+
+    hard = []
+    constraints = contract.get("target_constraints") or {}
+    if isinstance(constraints, dict):
+        hard = [str(x) for x in constraints.get("hard_constraints") or [] if str(x).strip()]
+    elif isinstance(constraints, list):
+        hard = [str(x) for x in constraints if str(x).strip()]
+    if hard:
+        unresolved = []
+        for candidate in strategies:
+            title = clean_str(candidate.get("title"), "候选")
+            satisfied = {
+                clean_str(x.get("constraint")): bool(x.get("satisfied"))
+                for x in candidate.get("satisfies_constraints") or []
+                if isinstance(x, dict)
+            }
+            for constraint in hard:
+                if not satisfied.get(constraint):
+                    unresolved.append(f"{title}×{constraint}")
+        rid += 1
+        requirements.append(_requirement(
+            f"R{rid}", "design", "每个候选都必须逐条回应目标硬约束",
+            "met" if not unresolved else "unmet", "strategies",
+            f"未满足/未回应：{unresolved[:6]}" if unresolved else "", "critical"))
+
+    pool = draft.get("candidate_pool") or {}
+    if pool:
+        rid += 1
+        generated = int(pool.get("generated") or 0)
+        after = int(pool.get("after_dedupe") or generated)
+        duplicates = len(pool.get("duplicates") or [])
+        requirements.append(_requirement(
+            f"R{rid}", "design", "候选池必须先扩充再聚类去重",
+            "met" if generated else "unmet", "candidate_pool",
+            f"生成 {generated} 个，去重后 {after} 个，判定同构 {duplicates} 组",
+            "major"))
+
+    signatures: dict[str, list[str]] = {}
+    for title, chain in chains.items():
+        key = ">".join(step["operator"] for step in chain)
+        signatures.setdefault(key, []).append(title)
+    same_chain = [names for names in signatures.values() if len(names) > 1]
+    rid += 1
+    requirements.append(_requirement(
+        f"R{rid}", "design", "候选之间的差异轴必须可解释（不是同一算子链换底物）",
+        "unmet" if same_chain and len(same_chain[0]) == len(strategies) else "met",
+        "strategies",
+        f"算子链相同的候选：{same_chain}" if same_chain else "", "major"))
+    return requirements, rid
+
+
 def _instruction_review(plan: dict[str, Any], request: str,
                         draft: dict[str, Any]) -> dict[str, Any]:
     contract = _normalize_contract(plan, request)
@@ -214,6 +366,9 @@ def _instruction_review(plan: dict[str, Any], request: str,
     requirements.append(_requirement(
         f"R{rid}", "format", f"交付格式：{fmt}", status,
         "deliverable", reason, "major"))
+
+    design_requirements, rid = _design_review(plan, draft, rid)
+    requirements.extend(design_requirements)
 
     active = [r for r in requirements if r["status"] != "not_applicable"]
     score = sum(1.0 if r["status"] == "met" else 0.5 if r["status"] == "partial" else 0.0
@@ -365,12 +520,36 @@ def normalize_review(data: dict[str, Any] | None,
 
 
 def _compact_knowledge(knowledge: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "patterns": (knowledge.get("patterns") or [])[:30],
-        "evidence": (knowledge.get("evidence") or [])[:50],
-        "hyperedges": (knowledge.get("hyperedges") or [])[:40],
-    }
+    referenced: set[str] = set()
+    summary = draft.get("summary") or {}
+    referenced.update(str(x) for x in summary.get("pattern_ids") or [])
+    referenced.update(str(x) for x in summary.get("evidence_ids") or [])
+    for section in draft.get("sections") or []:
+        for item in section.get("items") or []:
+            referenced.update(str(x) for x in item.get("pattern_ids") or [])
+            referenced.update(str(x) for x in item.get("evidence_ids") or [])
+    for strategy in draft.get("strategies") or []:
+        referenced.update(str(x) for x in strategy.get("pattern_ids") or [])
+        referenced.update(str(x) for x in strategy.get("evidence_ids") or [])
 
+    def select(items: list[dict[str, Any]], id_key: str,
+               limit: int) -> list[dict[str, Any]]:
+        included = [item for item in items
+                    if str(item.get(id_key) or "") in referenced]
+        included_ids = {str(item.get(id_key) or "") for item in included}
+        rest = [item for item in items
+                if str(item.get(id_key) or "") not in included_ids]
+        return included + rest[:max(0, limit - len(included))]
+
+    hyperedges = knowledge.get("hyperedges") or []
+    for hyperedge in hyperedges:
+        if hyperedge.get("hyperedge_id") is not None:
+            hyperedge["_reference_id"] = f"H-{int(hyperedge['hyperedge_id']):04d}"
+    return {
+        "patterns": select(knowledge.get("patterns") or [], "pattern_id", 30),
+        "evidence": select(knowledge.get("evidence") or [], "evidence_id", 50),
+        "hyperedges": select(hyperedges, "_reference_id", 40),
+    }
 
 def make_review_node(model=None, max_rounds: int = 3,
                      conn: sqlite3.Connection | None = None,
@@ -414,13 +593,22 @@ def make_review_node(model=None, max_rounds: int = 3,
                     "title": draft.get("title"),
                     "sections": draft.get("sections"),
                     "strategies": draft.get("strategies") or [],
-                    "markdown": render_draft(draft),
+                    "candidate_pool": draft.get("candidate_pool") or {},
+                    "selection": draft.get("selection") or {},
+                    "design_contract": draft.get("design_contract") or {},
+                    "revision_responses": draft.get("revision_responses") or [],
+                    "markdown": _draft_markdown(draft),
                 }, ensure_ascii=False, indent=2),
             )
             try:
-                msg = model.invoke([HumanMessage(content=prompt)])
-                parsed = parse_json_object(getattr(msg, "content", str(msg)))
+                raw, call_diag = invoke_with_timeout(
+                    model, prompt,
+                    timeout=getattr(settings, "study_review_timeout", 420))
+                if raw is None:
+                    raise RuntimeError(call_diag.get("error") or "模型调用失败")
+                parsed = parse_json_object(raw)
                 review = normalize_review(parsed, fallback)
+                review["model_call"] = call_diag
                 # Deterministic hard constraints always override LLM scores.
                 if fallback["instruction_compliance"].get("critical_failures"):
                     review["instruction_compliance"]["critical_failures"] = (
@@ -437,6 +625,19 @@ def make_review_node(model=None, max_rounds: int = 3,
         if review["decision"] != "pass" and rounds + 1 >= max(1, max_rounds):
             review = {**review, "decision": "manual_review",
                       "summary": f"{review.get('summary') or ''} | 已达最大审核轮数"}
+        # 内容节点未真正调用模型（纯确定性兜底）时，让内容节点"修订"没有意义：
+        # 直接转人工，避免白跑多轮真实 LLM 审核。骨架由代码生成、只做了候选深化的
+        # 情况允许再修订一轮（深化确实能补风险/验证计划/硬约束回应）。
+        generated_by = clean_str(draft.get("generated_by"), "")
+        if review["decision"] in ("revise", "need_more_data"):
+            if generated_by == "deterministic_fallback":
+                review = {**review, "decision": "manual_review",
+                          "summary": f"{review.get('summary') or ''} | "
+                                     "内容节点为确定性兜底，修订无法改进，转人工"}
+            elif generated_by == "deterministic_skeleton_expanded" and rounds + 1 >= 2:
+                review = {**review, "decision": "manual_review",
+                          "summary": f"{review.get('summary') or ''} | "
+                                     "候选骨架由代码生成，已修订一轮，转人工"}
         status = "manual_review" if review["decision"] == "manual_review" else "reviewed"
         log_study_event(conn, settings, "reviewer", run_id, status, {
             "decision": review["decision"],
@@ -444,6 +645,13 @@ def make_review_node(model=None, max_rounds: int = 3,
             "instruction_score": review["instruction_compliance"].get("score"),
             "evidence_score": review["evidence_correctness"].get("score"),
             "correctness_threshold": review["evidence_correctness"].get("threshold"),
+            "design_checks": len([
+                r for r in review["instruction_compliance"].get("requirements") or []
+                if r.get("category") == "design"]),
+            "design_failures": [
+                r.get("requirement") for r in
+                review["instruction_compliance"].get("requirements") or []
+                if r.get("category") == "design" and r.get("status") != "met"],
             "round": rounds + 1,
             "summary": review.get("summary"),
         })

@@ -94,6 +94,22 @@ CREATE TABLE IF NOT EXISTS processing_log (
     ts         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_log_paper ON processing_log(paper_key);
+
+CREATE TABLE IF NOT EXISTS study_runs (
+    run_id      TEXT,
+    round       INTEGER,
+    request     TEXT,
+    status      TEXT,
+    decision    TEXT,
+    plan        TEXT,
+    consumer    TEXT,
+    draft       TEXT,
+    review      TEXT,
+    fact_check  TEXT,
+    ts          TEXT,
+    PRIMARY KEY (run_id, round)
+);
+CREATE INDEX IF NOT EXISTS idx_study_runs_ts ON study_runs(ts);
 """
 
 
@@ -153,6 +169,85 @@ def log_event(conn: sqlite3.Connection, node: str, event: str,
          utcnow()),
     )
     conn.commit()
+
+
+def _json_dump(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _draft_for_storage(draft: dict[str, Any] | None) -> dict[str, Any] | None:
+    """落库时只保留草稿的结构化关键字段，避免 markdown 重复占用空间。"""
+    if not draft:
+        return draft
+    keep = ("title", "summary", "strategies", "candidate_pool", "selection",
+            "design_contract", "revision_responses", "revision_consumed",
+            "model_error", "_knowledge_stats")
+    if not draft.get("strategies"):
+        keep = ("title", "summary", "sections", "strategies", "design_contract",
+                "revision_responses", "model_error", "_knowledge_stats")
+    return {k: v for k, v in draft.items() if k in keep}
+
+
+def save_study_run(conn: sqlite3.Connection, run_id: str, out: dict[str, Any],
+                   *, round_index: int = 0, request: str = "") -> None:
+    """保存一次研究任务的关键中间态（计划/消费/草稿/审核/事实核查）。
+
+    没有这张表时，四节点产物只存在于内存，无法审计"改了什么、为什么改"。
+    """
+    knowledge = out.get("knowledge") or {}
+    consumer = {
+        "consumer_analysis": knowledge.get("consumer_analysis"),
+        "design_context": knowledge.get("design_context"),
+        "coverage_score": knowledge.get("coverage_score"),
+        "patterns": len(knowledge.get("patterns") or []),
+        "evidence": len(knowledge.get("evidence") or []),
+        "hyperedges": len(knowledge.get("hyperedges") or []),
+    }
+    conn.execute(
+        """
+        INSERT INTO study_runs(run_id, round, request, status, decision, plan,
+                               consumer, draft, review, fact_check, ts)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(run_id, round) DO UPDATE SET
+            status=excluded.status, decision=excluded.decision, plan=excluded.plan,
+            consumer=excluded.consumer, draft=excluded.draft, review=excluded.review,
+            fact_check=excluded.fact_check, ts=excluded.ts
+        """,
+        (
+            run_id, int(round_index), request or out.get("request") or "",
+            out.get("status"), out.get("decision"),
+            _json_dump(out.get("plan")),
+            _json_dump(consumer),
+            _json_dump(_draft_for_storage(out.get("draft"))),
+            _json_dump(out.get("review")),
+            _json_dump(out.get("fact_check")),
+            utcnow(),
+        ),
+    )
+    conn.commit()
+
+
+def get_study_runs(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]:
+    """读取一次研究任务的全部修订历史（按轮次）。"""
+    try:
+        rows = conn.execute(
+            "SELECT * FROM study_runs WHERE run_id=? ORDER BY round", (run_id,)
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for row in rows:
+        item = dict(row)
+        for key in ("plan", "consumer", "draft", "review", "fact_check"):
+            if item.get(key):
+                try:
+                    item[key] = json.loads(item[key])
+                except (TypeError, json.JSONDecodeError):
+                    pass
+        out.append(item)
+    return out
 
 
 def upsert_paper(conn: sqlite3.Connection, rec: dict[str, Any]) -> str:

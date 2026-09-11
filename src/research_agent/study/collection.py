@@ -36,8 +36,15 @@ def collect_mission(request: dict[str, Any],
     strategy = normalize_retrieval_strategy(
         ((request.get("retrieval") or {}).get("strategy")), "")
     evidence_mode = bool(edge_gaps) and strategy == STRATEGY_EVIDENCE_GAP
+    # 领域相关性硬门：跨域命中在入库前就被挡掉，避免污染机制抽取
+    gate_terms = list(terms) + [str(d) for d in (dimensions or []) if str(d).strip()]
+    for extra in ((request.get("retrieval_plan") or {}).get("must_cover") or []):
+        text = clean_str(extra)
+        if text:
+            gate_terms.append(text)
     collected: list[str] = []
     errors: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
     for term in terms[:max_topics]:
         fixed_queries: list[str] | None = None
         if evidence_mode:
@@ -54,9 +61,13 @@ def collect_mission(request: dict[str, Any],
             out = run_topic(term, max_results=per, services=services,
                             dimensions=dimensions,
                             domain_profile=domain_profile,
-                            fixed_queries=fixed_queries)
+                            fixed_queries=fixed_queries,
+                            topic_terms=gate_terms)
             keys = (out.get("ingest") or {}).get("paper_keys") or []
             collected.extend(keys)
+            gate = (out.get("ingest") or {}).get("relevance_gate")
+            if gate:
+                dropped.append({"term": term, **gate})
             logger.info("collect topic=%s papers=%d", term, len(keys))
         except Exception as exc:  # noqa: BLE001
             logger.warning("collect topic %s failed: %s", term, exc)
@@ -65,4 +76,5 @@ def collect_mission(request: dict[str, Any],
         "count": len(collected),
         "paper_keys": collected,
         "errors": errors,
+        "relevance_gate": dropped,
     }

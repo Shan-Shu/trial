@@ -948,6 +948,126 @@ def upsert_hyperedge(conn: sqlite3.Connection, *, hyperedge_type: str,
     return hyperedge_id, is_new
 
 
+def list_hyperedge_briefs(conn: sqlite3.Connection, *,
+                          min_confidence: float = 0.0,
+                          hyperedge_types: list[str] | None = None,
+                          limit: int = 0) -> list[dict[str, Any]]:
+    """轻量超边索引：只取打分所需字段，供“先筛选、后加载”使用。
+
+    真实语料里超边可达数千条，逐条联表加载成员/条件/证据代价很高。
+    本函数用两次查询取回全部候选的 (编号, 类型, 标签, 置信度) 与成员名，
+    供调用方在内存里做相关性排序，再对入选子集调用 ``load_hyperedges()``。
+    """
+    sql = ("SELECT hyperedge_id, hyperedge_type, label, confidence, paper_key "
+           "FROM ontology_hyperedges WHERE confidence>=?")
+    params: list[Any] = [float(min_confidence)]
+    if hyperedge_types:
+        sql += " AND hyperedge_type IN (" + ",".join("?" * len(hyperedge_types)) + ")"
+        params.extend(hyperedge_types)
+    sql += " ORDER BY confidence DESC, hyperedge_id DESC"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(max(1, int(limit)))
+    rows = conn.execute(sql, params).fetchall()
+    out: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        out[int(r["hyperedge_id"])] = {
+            "hyperedge_id": int(r["hyperedge_id"]),
+            "hyperedge_type": r["hyperedge_type"],
+            "label": r["label"] or "",
+            "confidence": round(float(r["confidence"] or 0), 3),
+            "paper_key": r["paper_key"],
+            "member_names": [],
+        }
+    if not out:
+        return []
+    ids = list(out)
+    placeholders = ",".join("?" * len(ids))
+    member_rows = conn.execute(
+        "SELECT m.hyperedge_id, m.position, n.name FROM ontology_hyperedge_members m "
+        "JOIN ontology_nodes n ON n.node_id=m.node_id "
+        f"WHERE m.hyperedge_id IN ({placeholders}) "
+        "ORDER BY m.hyperedge_id, m.position, m.id",
+        ids,
+    ).fetchall()
+    for mr in member_rows:
+        brief = out.get(int(mr["hyperedge_id"]))
+        if brief is not None and mr["name"]:
+            brief["member_names"].append(str(mr["name"]))
+    return list(out.values())
+
+
+def load_hyperedges(conn: sqlite3.Connection,
+                    hyperedge_ids: list[int]) -> list[dict[str, Any]]:
+    """按编号批量完整加载超边（成员/条件/测量/证据），固定 5 次查询。"""
+    ids = [int(x) for x in hyperedge_ids]
+    if not ids:
+        return []
+
+    def fetch_in(select_and_from: str, tail: str = "") -> list[sqlite3.Row]:
+        """按 400 个一组执行 IN 查询，避免 SQLite 变量数上限。"""
+        collected: list[sqlite3.Row] = []
+        for i in range(0, len(ids), 400):
+            part = ids[i:i + 400]
+            sql = (select_and_from + " IN (" + ",".join("?" * len(part)) + ")" + tail)
+            collected.extend(conn.execute(sql, part).fetchall())
+        return collected
+
+    base = {int(r["hyperedge_id"]): dict(r) for r in fetch_in(
+        "SELECT hyperedge_id, hyperedge_type, label, attributes, confidence, "
+        "evidence_tier, paper_key, created_at, provenance "
+        "FROM ontology_hyperedges WHERE hyperedge_id")}
+    members: dict[int, list[dict[str, Any]]] = {}
+    for r in fetch_in(
+            "SELECT m.hyperedge_id, m.node_id, m.role, m.position, m.qualifiers, "
+            "n.name, n.node_type, n.attributes "
+            "FROM ontology_hyperedge_members m "
+            "JOIN ontology_nodes n ON n.node_id=m.node_id "
+            "WHERE m.hyperedge_id", " ORDER BY m.hyperedge_id, m.position, m.id"):
+        members.setdefault(int(r["hyperedge_id"]), []).append(dict(r))
+    conditions: dict[int, list[dict[str, Any]]] = {}
+    for r in fetch_in(
+            "SELECT hyperedge_id, condition_key, operator, value_text, value_num, "
+            "unit, qualifier FROM ontology_hyperedge_conditions "
+            "WHERE hyperedge_id", " ORDER BY hyperedge_id, id"):
+        conditions.setdefault(int(r["hyperedge_id"]), []).append(dict(r))
+    measurements: dict[int, list[dict[str, Any]]] = {}
+    for r in fetch_in(
+            "SELECT hyperedge_id, metric, value_text, value_num, unit, qualifier, "
+            "subject_node FROM ontology_hyperedge_measurements "
+            "WHERE hyperedge_id", " ORDER BY hyperedge_id, id"):
+        measurements.setdefault(int(r["hyperedge_id"]), []).append(dict(r))
+    evidence: dict[int, list[dict[str, Any]]] = {}
+    for r in fetch_in(
+            "SELECT hyperedge_id, paper_key, section, span_text, char_start, char_end "
+            "FROM ontology_hyperedge_evidence WHERE hyperedge_id",
+            " ORDER BY hyperedge_id, id"):
+        evidence.setdefault(int(r["hyperedge_id"]), []).append(dict(r))
+
+    out = []
+    for hid in ids:
+        row = base.get(hid)
+        if row is None:
+            continue
+        for key in ("attributes", "provenance"):
+            try:
+                row[key] = json.loads(row.get(key) or ("[]" if key == "provenance" else "{}"))
+            except json.JSONDecodeError:
+                row[key] = [] if key == "provenance" else {}
+        row_members = members.get(hid, [])
+        for m in row_members:
+            for key in ("qualifiers", "attributes"):
+                try:
+                    m[key] = json.loads(m.get(key) or "{}")
+                except json.JSONDecodeError:
+                    m[key] = {}
+        row.update({"members": row_members, "conditions": conditions.get(hid, []),
+                    "measurements": measurements.get(hid, []),
+                    "evidence": evidence.get(hid, [])})
+        out.append(row)
+    return out
+
+
 def list_hyperedges(conn: sqlite3.Connection, *, limit: int = 500,
                     min_confidence: float = 0.0,
                     node_ids: set[int] | None = None,

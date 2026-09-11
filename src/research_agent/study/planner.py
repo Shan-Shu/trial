@@ -25,27 +25,26 @@ from research_agent.study.json_utils import clean_str, parse_json_object
 
 logger = logging.getLogger(__name__)
 
-PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给出较简单或模糊的指令，
-你需要把指令转成一份结构化“研究任务单”，供知识消费节点和内容形成节点执行。
+PLANNER_PROMPT = """你是科研辅助系统的工作规划节点，也是整个研究任务的统一入口。
+你必须先把用户请求转换成可执行的研究任务单，后续检索、质量评估、知识提取、
+知识消费、内容形成和审核都只能依据这份任务单工作。
 
 硬性要求：
 1. 不要生成内容大纲，不要预设章节，不要预判研究结论；
-2. 先判断任务性质：summary(综述/调研)、generative(提出新方法/新方案/新设计)、
-   frontier(前沿探索)、evaluation(评估/比较/选择)；
-3. 对 generative 任务，必须输出 creative_contract，说明需要生成什么、
-   可以组合哪些方向、最少生成几个候选、如何判断“不是简单复述”；
-4. 再把“收集什么证据、多宽、多久之前、哪些分析维度”说清楚；
-5. 领域画像可随任务生成，但任务性质和生成要求必须是领域无关的；
-6. seed_terms 使用能直接投递到目标文献库的检索词：国际学术库用英文，
+2. 判断任务性质：summary(综述/调研)、generative(提出新方法/新方案/新设计)、
+   frontier(前沿探索)、evaluation(评估/比较/选择)、proof(证明)；
+3. 必须生成 retrieval_plan，明确检索什么、为什么检索、覆盖哪些维度、
+   使用哪些来源、时间范围和停止条件；用户原话不能未经规划直接作为检索词；
+4. 必须生成 analysis_plan 和 evidence_policy，统一约束后续节点的分析维度和证据标准；
+5. 对 generative 任务必须生成 design_contract，明确目标对象、目标结构硬约束、
+   创新等级下限、候选数量、差异轴、评价标准和限制；
+6. creative_contract 仅作兼容字段，可以保留，但不能把组合/替换/迁移当作核心创新；
+7. seed_terms 使用能直接投递到目标文献库的检索词：国际学术库用英文，
    NCPSSD/CNKI 等中文库用中文；禁止把用户整句话直接作为 seed_terms 或 domain；
-7. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
-8. 根据用户需求判断检索策略 retrieval：
-   - 默认 broad：先做广泛主题检索；
-   - 若用户要求对本体已有边补强、多源验证、共识或证据缺口，启用
-     evidence_gap（evidence_gap_enabled=true）；
-   - 仅当用户明确要求“某一单领域的精深挖掘、系统追溯、参考文献/引用溯源”时，
-     才启用 deep_single_domain；不得对普通综述自动启用递归溯源。
-9. 只输出 JSON 对象，不要代码块，不要解释。
+8. content_type 从 research_report/frontier_review/research_directions/experiment_protocol 中选择；
+9. retrieval 字段保留现有检索策略兼容；默认 broad，若用户要求补强证据缺口则启用
+   evidence_gap，仅在明确要求单领域深挖时启用 deep_single_domain；
+10. 只输出 JSON 对象，不要代码块，不要解释。
 
 示例（只参考字段风格，不要照抄用户原话作为 domain/seed_terms）：
 用户原话：尝试提出一种炔酰胺构建多元氮杂化合物的新方法
@@ -62,12 +61,32 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
   "goal": "一句话目标",
   "domain": "研究领域",
   "content_type": "research_report|frontier_review|research_directions|experiment_protocol",
-  "task_kind": "summary|generative|frontier|evaluation",
-  "creative_contract": {{
+  "task_kind": "summary|generative|frontier|evaluation|proof",
+  "analysis_plan": {{
+    "dimensions": ["机制", "底物范围", "选择性", "条件兼容性", "反例"],
+    "required_comparisons": [],
+    "open_questions": []
+  }},
+  "evidence_policy": {{
+    "traceability_required": true,
+    "hypothesis_label_required": true,
+    "minimum_support": 2,
+    "allow_evidence_gap_retrieval": true
+  }},
+  "design_contract": {{
     "objective": "用户期望获得的新对象/新方案描述",
+    "target_constraints": {{"hard_constraints": [], "must_explain": []}},
+    "innovation_floor": "L3",
+    "min_candidates": 4,
+    "differentiation_axes": ["mechanism", "intermediate", "selectivity", "operator_chain"],
+    "evaluation_criteria": ["目标匹配", "创新等级", "机制可行性", "证据支持", "验证成本"],
+    "constraints": ["不能只复述已有方案", "必须区分假设与已知事实"]
+  }},
+  "creative_contract": {{
+    "objective": "兼容旧内容节点的生成目标",
     "focus": "研究或设计焦点",
-    "min_candidates": 3,
-    "creative_operations": ["组合已有方案", "跨域迁移", "替换组件", "扩展对象范围"],
+    "min_candidates": 4,
+    "creative_operations": [],
     "constraints": ["不能只复述已有方案", "必须区分假设与已知事实"],
     "evaluation_criteria": ["新颖性", "可行性", "可解释性", "可验证性"]
   }},
@@ -85,6 +104,17 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
     "min_confidence": 0.6,
     "collection_mode": "broad",
     "recency_window": "2018-01-01:{today}"
+  }},
+  "retrieval_plan": {{
+    "objective": "需要收集什么证据",
+    "query_variants": ["实际可投递检索词"],
+    "source_mix": ["europepmc", "arxiv", "semantic_scholar"],
+    "dimensions": ["mechanism", "substrate_scope", "selectivity"],
+    "recency_window": "2018-01-01:{today}",
+    "max_results_per_query": 20,
+    "min_quality": 0.6,
+    "must_cover": ["目标骨架", "关键中间体", "反例"],
+    "stop_conditions": ["核心机制至少两条独立证据", "主要路线覆盖达到阈值"]
   }},
   "retrieval": {{
     "strategy": "broad|evidence_gap|deep_single_domain",
@@ -107,6 +137,8 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
     "evidence_policy": "每条实质断言可溯源",
     "correctness_threshold": 0.85
   }},
+  "stop_conditions": ["检索达到覆盖要求", "新增证据不再改变主要结论"],
+  "budget": {{"max_collection_rounds": 2, "max_total_results": 160}},
   "deliverable": {{
     "format": "markdown",
     "sections_policy": "emergent",
@@ -115,10 +147,7 @@ PLANNER_PROMPT = """你是科研辅助系统的工作规划节点。用户会给
   "constraints": []
 }}
 
-请直接输出可解析的 JSON：
-
-注意：creative_contract 必须用领域无关语言描述“生成什么、如何生成、如何评价”，
-domain_profile 才用来实例化领域词汇。"""
+请直接输出可解析的 JSON："""
 
 
 
@@ -208,17 +237,39 @@ def infer_task_kind(request: str) -> str:
     return "generative"
 
 
+def _string_list(value: Any, limit: int = 50) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out = [clean_str(item) for item in value if clean_str(item)]
+    return list(dict.fromkeys(out))[:limit]
+
+
+def _int_value(value: Any, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_value(value: Any, default: float, minimum: float = 0.0,
+                 maximum: float = 1.0) -> float:
+    try:
+        return min(maximum, max(minimum, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def normalize_creative_contract(data: dict[str, Any] | None,
                                 request: str,
-                                domain: str) -> dict[str, Any]:
-    """领域无关的生成任务契约：说明生成什么、如何生成、如何评价。"""
+                                domain: str,
+                                design_contract: dict[str, Any] | None = None) -> dict[str, Any]:
+    """领域无关的生成任务契约，保留旧 Content/Reviewer 兼容字段。"""
     raw = data or {}
-    objective = clean_str(raw.get("objective"), request)
+    design = design_contract or {}
+    objective = clean_str(raw.get("objective"), clean_str(
+        design.get("objective"), request))
     focus = clean_str(raw.get("focus"), domain or objective)
-    operations = [
-        clean_str(x) for x in raw.get("creative_operations") or []
-        if clean_str(x)
-    ]
+    operations = _string_list(raw.get("creative_operations"), limit=20)
     if not operations:
         operations = [
             "组合已有方案/方法",
@@ -227,16 +278,14 @@ def normalize_creative_contract(data: dict[str, Any] | None,
             "扩展原有方案到更一般情形",
             "设计新的顺序或流水线",
         ]
-    criteria = [
-        clean_str(x) for x in raw.get("evaluation_criteria") or []
-        if clean_str(x)
-    ]
+    criteria = _string_list(
+        raw.get("evaluation_criteria") or design.get("evaluation_criteria"),
+        limit=30,
+    )
     if not criteria:
         criteria = ["新颖性", "可行性", "可解释性", "可验证性"]
-    constraints = [
-        clean_str(x) for x in raw.get("constraints") or []
-        if clean_str(x)
-    ]
+    constraints = _string_list(
+        raw.get("constraints") or design.get("constraints"), limit=30)
     if not constraints:
         constraints = [
             "不能只复述已有方案",
@@ -246,44 +295,176 @@ def normalize_creative_contract(data: dict[str, Any] | None,
     return {
         "objective": objective,
         "focus": focus,
-        "min_candidates": max(1, int(raw.get("min_candidates") or 3)),
+        "min_candidates": _int_value(
+            raw.get("min_candidates") or design.get("min_candidates"), 4, 1),
+        "innovation_floor": clean_str(
+            raw.get("innovation_floor") or design.get("innovation_floor"), "L3"),
+        "target_constraints": (
+            raw.get("target_constraints") or design.get("target_constraints") or {}),
+        "differentiation_axes": _string_list(
+            raw.get("differentiation_axes") or design.get("differentiation_axes"),
+            limit=20,
+        ),
         "creative_operations": operations,
         "constraints": constraints,
         "evaluation_criteria": criteria,
     }
 
 
+def normalize_analysis_plan(data: dict[str, Any] | None,
+                            fallback_targets: list[str] | None = None) -> dict[str, Any]:
+    raw = data or {}
+    dimensions = _string_list(raw.get("dimensions") or fallback_targets, limit=30)
+    return {
+        "dimensions": dimensions,
+        "required_comparisons": _string_list(
+            raw.get("required_comparisons"), limit=30),
+        "open_questions": _string_list(raw.get("open_questions"), limit=30),
+    }
+
+
+def normalize_evidence_policy(data: dict[str, Any] | None) -> dict[str, Any]:
+    raw = data or {}
+    return {
+        "traceability_required": bool(raw.get("traceability_required", True)),
+        "hypothesis_label_required": bool(
+            raw.get("hypothesis_label_required", True)),
+        "minimum_support": _int_value(raw.get("minimum_support"), 2, 1),
+        "allow_evidence_gap_retrieval": bool(
+            raw.get("allow_evidence_gap_retrieval", True)),
+    }
+
+
+def normalize_retrieval_plan(data: dict[str, Any] | None,
+                             mission: dict[str, Any],
+                             retrieval: dict[str, Any],
+                             analysis: list[str],
+                             domain: str,
+                             today: str) -> dict[str, Any]:
+    raw = data or {}
+    query_variants = _string_list(
+        raw.get("query_variants") or mission.get("seed_terms"), limit=30)
+    if not query_variants:
+        query_variants = [domain]
+    dimensions = _string_list(
+        raw.get("dimensions") or analysis, limit=30)
+    stop_conditions = raw.get("stop_conditions") or [
+        "核心机制至少获得两条独立证据",
+        "新增检索不再改变主要结论",
+    ]
+    if not isinstance(stop_conditions, list):
+        stop_conditions = [stop_conditions]
+    return {
+        "objective": clean_str(raw.get("objective"), "收集完成任务所需的可追溯证据"),
+        "query_variants": query_variants,
+        "source_mix": _string_list(raw.get("source_mix"), limit=12),
+        "dimensions": dimensions,
+        "recency_window": clean_str(
+            raw.get("recency_window"), mission.get("recency_window")
+            or f"2018-01-01:{today}"),
+        "max_results_per_query": _int_value(
+            raw.get("max_results_per_query") or mission.get("max_results"), 20, 1),
+        "min_quality": _float_value(
+            raw.get("min_quality"), float(mission.get("min_confidence") or 0.6)),
+        "must_cover": _string_list(raw.get("must_cover"), limit=30),
+        "stop_conditions": stop_conditions,
+        "strategy": clean_str(raw.get("strategy"), retrieval.get("strategy")
+                              or "broad"),
+    }
+
+
+def normalize_design_contract(data: dict[str, Any] | None,
+                              task_kind: str,
+                              request: str,
+                              domain: str,
+                              creative_contract: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if task_kind != "generative":
+        return None
+    raw = data or {}
+    creative = creative_contract or {}
+    target_constraints = raw.get("target_constraints") or {}
+    if isinstance(target_constraints, list):
+        target_constraints = {"hard_constraints": target_constraints}
+    return {
+        "objective": clean_str(
+            raw.get("objective") or creative.get("objective"), request),
+        "focus": clean_str(
+            raw.get("focus") or creative.get("focus"), domain or request),
+        "target_constraints": target_constraints if isinstance(
+            target_constraints, dict) else {},
+        "innovation_floor": clean_str(
+            raw.get("innovation_floor") or creative.get("innovation_floor"), "L3"),
+        "min_candidates": _int_value(
+            raw.get("min_candidates") or creative.get("min_candidates"), 4, 1),
+        "differentiation_axes": _string_list(
+            raw.get("differentiation_axes")
+            or creative.get("differentiation_axes"), limit=30),
+        "evaluation_criteria": _string_list(
+            raw.get("evaluation_criteria")
+            or creative.get("evaluation_criteria"), limit=30),
+        "constraints": _string_list(
+            raw.get("constraints") or creative.get("constraints"), limit=30),
+    }
+
+
+def normalize_budget(data: dict[str, Any] | None,
+                     mission: dict[str, Any]) -> dict[str, Any]:
+    raw = data or {}
+    max_total = _int_value(
+        raw.get("max_total_results"), int(mission.get("max_results") or 80), 1)
+    return {
+        "max_collection_rounds": _int_value(
+            raw.get("max_collection_rounds"), 2, 1),
+        "max_total_results": max_total,
+        "max_candidates": _int_value(raw.get("max_candidates"), 50, 1),
+    }
+
+
 def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
-    """补全缺失字段，保证后续节点拿到统一结构。"""
+    """补全字段，形成 Planner-first 的统一研究任务契约。"""
     raw = data or {}
     goal = clean_str(raw.get("goal"), request)
     domain = clean_str(raw.get("domain"), goal)
     content_type = clean_str(raw.get("content_type"), infer_content_type(request))
     task_kind = clean_str(raw.get("task_kind"), infer_task_kind(request)).lower()
-    if task_kind not in ("summary", "generative", "frontier", "evaluation"):
+    if task_kind not in ("summary", "generative", "frontier", "evaluation", "proof"):
         task_kind = infer_task_kind(request)
+    today = date.today().isoformat()
+
     mission_raw = raw.get("mission") or {}
-    terms = [clean_str(t) for t in mission_raw.get("seed_terms") or [] if clean_str(t)]
+    terms = _string_list(mission_raw.get("seed_terms"), limit=30)
     if not terms:
         terms = [domain]
-    today = date.today().isoformat()
     mission = {
         "seed_terms": terms,
-        "max_results": int(mission_raw.get("max_results") or 80),
-        "min_confidence": float(mission_raw.get("min_confidence") or 0.6),
+        "max_results": _int_value(mission_raw.get("max_results"), 80, 1),
+        "min_confidence": _float_value(mission_raw.get("min_confidence"), 0.6),
         "collection_mode": clean_str(mission_raw.get("collection_mode"), "broad"),
         "recency_window": clean_str(
             mission_raw.get("recency_window"), f"2018-01-01:{today}"),
     }
     retrieval = normalize_retrieval(raw.get("retrieval"), request)
-    analysis = [clean_str(t) for t in raw.get("analysis_targets") or [] if clean_str(t)]
-    if not analysis:
-        analysis = ["方法", "材料", "性能指标", "应用", "开放问题"]
-    deliverable = raw.get("deliverable") or {}
+    analysis_targets = _string_list(raw.get("analysis_targets"), limit=30)
+    if not analysis_targets:
+        analysis_targets = ["方法", "材料", "性能指标", "应用", "开放问题"]
+    analysis_plan = normalize_analysis_plan(
+        raw.get("analysis_plan"), analysis_targets)
+    if analysis_plan["dimensions"]:
+        analysis_targets = analysis_plan["dimensions"]
+
     creative_contract = None
+    design_contract = None
     if task_kind == "generative":
         creative_contract = normalize_creative_contract(
             raw.get("creative_contract"), request, domain)
+        design_contract = normalize_design_contract(
+            raw.get("design_contract"), task_kind, request, domain,
+            creative_contract)
+        if design_contract is not None:
+            creative_contract = normalize_creative_contract(
+                raw.get("creative_contract"), request, domain, design_contract)
+
+    deliverable = raw.get("deliverable") or {}
     deliverable_out = {
         "format": clean_str(deliverable.get("format"), "markdown"),
         "sections_policy": "emergent",
@@ -292,18 +473,33 @@ def normalize_plan(data: dict[str, Any] | None, request: str) -> dict[str, Any]:
     instruction_contract = normalize_instruction_contract(
         raw.get("instruction_contract"), request, task_kind,
         creative_contract, deliverable_out)
+    retrieval_plan = normalize_retrieval_plan(
+        raw.get("retrieval_plan"), mission, retrieval, analysis_targets,
+        domain, today)
+    evidence_policy = normalize_evidence_policy(raw.get("evidence_policy"))
+    stop_conditions = raw.get("stop_conditions") or retrieval_plan.get(
+        "stop_conditions") or []
+    if not isinstance(stop_conditions, list):
+        stop_conditions = [stop_conditions]
+    budget = normalize_budget(raw.get("budget"), mission)
     return {
         "goal": goal,
         "domain": domain,
         "content_type": content_type,
         "task_kind": task_kind,
+        "analysis_plan": analysis_plan,
+        "evidence_policy": evidence_policy,
+        "design_contract": design_contract,
         "creative_contract": creative_contract,
         "domain_profile": normalize_domain_profile(
             raw.get("domain_profile"), domain, request),
-        "analysis_targets": analysis,
+        "analysis_targets": analysis_targets,
         "mission": mission,
+        "retrieval_plan": retrieval_plan,
         "retrieval": retrieval,
         "instruction_contract": instruction_contract,
+        "stop_conditions": stop_conditions,
+        "budget": budget,
         "deliverable": deliverable_out,
         "constraints": raw.get("constraints") or [],
     }
@@ -317,8 +513,13 @@ def deterministic_plan(request: str) -> dict[str, Any]:
 def make_planner_node(model=None,
                       max_results_override: int | None = None,
                       conn: sqlite3.Connection | None = None,
-                      settings: Settings | None = None):
-    """构造 LangGraph 工作规划节点。model 为 None 时使用确定性任务单。"""
+                      settings: Settings | None = None,
+                      budget_override: dict[str, Any] | None = None):
+    """构造 LangGraph 工作规划节点。model 为 None 时使用确定性任务单。
+
+    budget_override 可按顶层入口下调预算（如候选池规模），
+    用于控制单次 LLM 的输出长度，避免超大 JSON 导致请求长时间挂起。
+    """
     settings = settings or default_settings
 
     def planner_node(state: dict) -> dict:
@@ -338,14 +539,34 @@ def make_planner_node(model=None,
                 parsed = parse_json_object(raw)
                 plan = normalize_plan(parsed, request)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("规划节点 LLM 调用失败，回退确定性任务单: %s", exc)
+                logger.warning("规划节点 LLM 调用失败: %s", exc)
                 model_error = str(exc)
+        if plan is None and model is not None:
+            log_study_event(conn, settings, "planner", run_id, "failed",
+                            {"error": model_error or "empty planner output"})
+            return {
+                "plan": {},
+                "status": "planning_failed",
+                "error": model_error or "Planner LLM 未返回有效任务单",
+            }
         if plan is None:
             plan = deterministic_plan(request)
-        if model_error:
-            plan["model_error"] = model_error
+            plan["planner_mode"] = "offline_fallback"
+        else:
+            plan["planner_mode"] = "llm"
         if max_results_override is not None:
             plan["mission"]["max_results"] = max(1, int(max_results_override))
+            plan.setdefault("retrieval_plan", {})[
+                "max_results_per_query"] = max(1, int(max_results_override))
+        if budget_override:
+            budget = plan.setdefault("budget", {})
+            for key, value in budget_override.items():
+                if value is None:
+                    continue
+                try:
+                    budget[key] = max(1, int(value))
+                except (TypeError, ValueError):
+                    continue
         log_study_event(
             conn, settings, "planner", run_id, "done",
             {
@@ -353,10 +574,14 @@ def make_planner_node(model=None,
                 "domain": plan.get("domain"),
                 "content_type": plan.get("content_type"),
                 "task_kind": plan.get("task_kind"),
-                "min_candidates": ((plan.get("creative_contract") or {})
+                "min_candidates": ((plan.get("design_contract") or {})
                                    .get("min_candidates")),
+                "innovation_floor": ((plan.get("design_contract") or {})
+                                     .get("innovation_floor")),
                 "seed_terms": plan.get("mission", {}).get("seed_terms"),
                 "max_results": plan.get("mission", {}).get("max_results"),
+                "retrieval_queries": (
+                    plan.get("retrieval_plan", {}).get("query_variants")),
             })
         return {"plan": plan, "status": "planned"}
 
