@@ -15,6 +15,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from research_agent import packs
 from research_agent.config import Settings, settings as default_settings
 from research_agent.domains import normalize_domain_profile
 from research_agent.retrieval.skills import (
@@ -201,39 +202,43 @@ def normalize_instruction_contract(
     }
 
 
+def _task_hints() -> dict[str, list[str]]:
+    """任务类型/内容类型判定关键词（来自 packs/skills/task-kind-hints）。
+
+    支持两种包结构：顶层直接是关键词数组，或内容类型集中在 ``content_type`` 下。
+    """
+    data = packs.skill_data("task-kind-hints")
+    if not data:
+        packs.warn_once("task-hints-missing",
+                        "未加载 packs/skills/task-kind-hints；任务类型将统一回落到 generative")
+    out: dict[str, list[str]] = {}
+    for key, value in data.items():
+        if isinstance(value, list):
+            out[key] = [str(x) for x in value]
+        elif isinstance(value, dict) and key == "content_type":
+            for sub, items in value.items():
+                if isinstance(items, list):
+                    out[str(sub)] = [str(x) for x in items]
+    return out
+
+
 def infer_content_type(request: str) -> str:
     text = request.lower()
-    if any(k in text for k in ("提出", "propose", "new method", "新方法",
-                               "合成方法", "strategy", "策略")):
-        return "research_directions"
-    if any(k in text for k in ("实验", "protocol", "design", "设计")):
-        return "experiment_protocol"
-    if any(k in text for k in ("方向", "idea", "gap", "候选")):
-        return "research_directions"
-    if any(k in text for k in ("前沿", "最新", "进展", "survey", "review")):
-        return "frontier_review"
+    hints = _task_hints()
+    # 顺序敏感：frontier_review 与 research_directions 的词有重叠，
+    # 先判定更"体裁明确"的综述/实验，再落到研究方向。
+    for content_type in ("frontier_review", "experiment_protocol",
+                         "research_directions"):
+        if any(k in text for k in hints.get(content_type) or []):
+            return content_type
     return "research_report"
-
-
-GENERATIVE_HINTS = (
-    "提出", "propose", "new method", "新方法", "新方案", "设计", "框架",
-    "new framework", "新框架", "候选", "策略", "approach",
-)
-SUMMARY_HINTS = ("综述", "总结", "review", "summarize", "调研")
-FRONTIER_HINTS = ("前沿", "最新", "进展", "趋势", "frontier")
-EVALUATION_HINTS = ("评估", "比较", "对比", "选择", "evaluate", "compare")
-
 
 def infer_task_kind(request: str) -> str:
     text = request.lower()
-    if any(k in text for k in GENERATIVE_HINTS):
-        return "generative"
-    if any(k in text for k in EVALUATION_HINTS):
-        return "evaluation"
-    if any(k in text for k in FRONTIER_HINTS):
-        return "frontier"
-    if any(k in text for k in SUMMARY_HINTS):
-        return "summary"
+    hints = _task_hints()
+    for kind in ("generative", "evaluation", "frontier", "summary"):
+        if any(str(k).lower() in text for k in hints.get(kind) or []):
+            return kind
     return "generative"
 
 

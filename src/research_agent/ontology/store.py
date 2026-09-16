@@ -7,6 +7,9 @@
 2. **合并更新**：节点以 (node_type, normalized_name) 唯一；重复出现时
    合并别名/属性/来源证据，置信度取 max（新证据不降低旧结论，只增补）。
 3. **溯源**：每个节点/边记录 provenance（来源论文 + 证据句子），可审计。
+4. **领域词表外置**：种子类型、关系同义归一与强断言集合全部来自
+   `packs/skills/relation-lexicon`（可用 `RA_PACKS_DIR` 挂载自定义包），
+   本模块不再内联任何学科词表。
 """
 from __future__ import annotations
 
@@ -18,120 +21,38 @@ from datetime import datetime, timezone
 from typing import Any
 
 from research_agent.db import meta_bump, meta_get, meta_set, utcnow
-
-
-SEED_NODE_TYPES = [
-    ("Method", "方法/技术"),
-    ("Dataset", "数据集"),
-    ("Metric", "指标/评测标准"),
-    ("Task", "任务"),
-    ("Concept", "概念"),
-    ("Tool", "工具/软件/模型"),
-    ("Person", "人物/作者"),
-    ("Organization", "机构/组织"),
-    ("Material", "材料/样本"),
-    ("Disease", "疾病"),
-    ("Drug", "药物"),
-    ("Gene", "基因/蛋白"),
-    ("Event", "事件"),
-]
-
-SEED_RELATION_TYPES = [
-    ("uses", "使用"),
-    ("evaluates", "评估"),
-    ("compares", "比较"),
-    ("part_of", "属于/组成"),
-    ("improves_upon", "改进自"),
-    ("based_on", "基于"),
-    ("promotes", "促进/增强/加速"),
-    ("regulates", "调控"),
-    ("activates", "激活"),
-    ("releases", "释放/缓释"),
-    ("differentiates_into", "分化为"),
-    ("correlates_with", "与…相关/随…变化(非因果)"),
-    ("enables", "使能/实现/支持(应用/功能)"),
-    ("complicates", "并发/加重(并发症)"),
-    ("risk_factor_for", "是…的风险因素"),
-    ("results_in", "导致…结果(过程→结果)"),
-    ("is_a", "是…的一种(类型层级)"),
-    ("inhibits", "抑制"),
-    ("made_of", "由…制成/组成"),
-    ("produced_by", "由…产生/合成"),
-    ("related_to", "相关/关联"),
-    ("regulates", "调控"),
-    ("cites", "引用"),
-    ("published_in", "发表于"),
-    ("authored_by", "作者"),
-    ("developed_by", "开发自"),
-    ("causes", "导致"),
-    ("treats", "治疗"),
-    ("targets", "作用于"),
-    ("has_property", "具有属性"),
-]
-
-RELATION_SYNONYMS = {
-    "utilize": "uses", "utilizes": "uses", "employ": "uses", "employs": "uses",
-    "apply": "uses", "applies": "uses", "applied": "uses", "used in": "uses",
-    "assess": "evaluates", "assessed": "evaluates", "benchmark": "evaluates",
-    "benchmarked": "evaluates", "test on": "evaluates", "tested on": "evaluates",
-    "validate": "evaluates", "validated": "evaluates",
-    "consists of": "made_of", "composed of": "made_of", "comprised of": "made_of",
-    "fabricated from": "made_of", "made from": "made_of",
-    "lead to": "causes", "leads to": "causes", "contributes to": "causes",
-    "trigger": "causes", "triggered": "causes",
-    "promote": "promotes", "promotes": "promotes", "enhance": "promotes",
-    "enhances": "promotes", "facilitates": "promotes", "accelerates": "promotes",
-    "accelerate": "promotes", "boost": "promotes", "boosted": "promotes",
-    "induce": "promotes", "induces": "promotes", "induced": "promotes",
-    "upregulate": "regulates", "upregulates": "regulates",
-    "activate": "activates", "activates": "activates",
-    "release": "releases", "releases": "releases", "elute": "releases",
-    "sustained release": "releases",
-    "differentiate into": "differentiates_into",
-    "differentiated into": "differentiates_into",
-    "differentiation into": "differentiates_into",
-    "correlate": "correlates_with", "correlates": "correlates_with",
-    "correlated with": "correlates_with",
-    "track": "correlates_with", "tracks": "correlates_with",
-    "enable": "enables", "enables": "enables", "allowed": "enables",
-    "makes possible": "enables",
-    "complicate": "complicates", "complicates": "complicates",
-    "complication of": "complicates",
-    "risk factor for": "risk_factor_for", "predispose to": "risk_factor_for",
-    "predisposes to": "risk_factor_for",
-    "result in": "results_in", "results in": "results_in",
-    "resulting in": "results_in",
-    "is a": "is_a", "is an": "is_a", "a kind of": "is_a",
-    "type of": "is_a", "subclass of": "is_a",
-    "suppress": "inhibits", "suppresses": "inhibits", "downregulates": "inhibits",
-    "exhibit": "has_property", "exhibits": "has_property", "possesses": "has_property",
-    "shows": "has_property", "display": "has_property",
-    "derived from": "based_on", "originates from": "based_on",
-    "outperform": "improves_upon", "outperforms": "improves_upon",
-    "better than": "improves_upon", "superior to": "improves_upon",
-    "act on": "targets", "acts on": "targets", "bind": "targets", "binds": "targets",
-    "interacts with": "targets",
-    "associated with": "related_to", "relates to": "related_to",
-    "involved in": "related_to",
-    "produced by": "produced_by", "synthesized by": "produced_by",
-    "secreted by": "produced_by", "generate": "produced_by",
-    "compare with": "compares", "compared with": "compares",
-    "compare to": "compares", "compared to": "compares",
-    "versus": "compares",
-    "cure": "treats", "treat": "treats", "treated": "treats",
-    "part of": "part_of", "belong to": "part_of",
-    "cite": "cites", "reference": "cites", "references": "cites",
-    "publish in": "published_in", "appear in": "published_in",
-    "author by": "authored_by", "written by": "authored_by",
-    "develop": "developed_by", "create": "developed_by", "creates": "developed_by",
-    "designed by": "developed_by",
-}
+from research_agent.packs import (
+    canonical_relation_type as _pack_canonical_relation,
+    relation_lexicon,
+    seed_node_types,
+    seed_relation_types,
+    strong_relations,
+)
 
 
 def canonical_relation_type(relation_type: str) -> str:
-    """把同义/动词化变体归一到受控词表词；无法归一则保留原词。"""
+    """把同义/动词化变体归一到受控词表词；无法归一则保留原词。
+
+    词表来自 `packs/skills/relation-lexicon`（不再内联在代码里）。
+    """
     key = re.sub(r"\s+", " ", str(relation_type or "").strip().lower())
-    return RELATION_SYNONYMS.get(key, relation_type)
+    synonyms = relation_lexicon()["synonyms"]
+    return synonyms.get(key, _pack_canonical_relation(relation_type))
+
+
+def seeded_node_types() -> list[tuple[str, str]]:
+    """种子节点类型（技能包 + 各领域包的追加项）。"""
+    return [(str(t), str(l)) for t, l in seed_node_types()]
+
+
+def seeded_relation_types() -> list[tuple[str, str]]:
+    """种子关系类型（技能包 + 各领域包的追加项）。"""
+    return [(str(t), str(l)) for t, l in seed_relation_types()]
+
+
+def strong_relation_types() -> set[str]:
+    """需要置信门控的强断言关系集合。"""
+    return strong_relations()
 
 
 ONTOLOGY_SCHEMA = """
@@ -438,9 +359,9 @@ def init_ontology(conn: sqlite3.Connection) -> None:
                    "TEXT DEFAULT 'unclassified'")
     _ensure_column(conn, "ontology_edges", "evidence_tier",
                    "TEXT DEFAULT 'unclassified'")
-    for key, label in SEED_NODE_TYPES:
+    for key, label in seeded_node_types():
         _ensure_type_row(conn, key, "node", label, "seed")
-    for key, label in SEED_RELATION_TYPES:
+    for key, label in seeded_relation_types():
         _ensure_type_row(conn, key, "relation", label, "seed")
     if meta_get(conn, "ontology_schema_version") is None:
         meta_set(conn, "ontology_schema_version", 1)
@@ -638,10 +559,13 @@ def record_ontology_run(conn: sqlite3.Connection, paper_key: str,
     return int(cur.lastrowid)
 
 
-STRONG_RELATIONS = {
-    "promotes", "regulates", "activates", "inhibits", "causes",
-    "treats", "targets", "differentiates_into", "releases", "results_in",
-}
+def strong_relation_set() -> set[str]:
+    """强断言关系集合（来自 packs/skills/relation-lexicon）。
+
+    保留函数形式而非模块级常量：词表可被 `RA_PACKS_DIR` 覆盖，
+    运行期不应缓存成不可变快照。
+    """
+    return strong_relation_types()
 
 
 def add_event_assertion(conn: sqlite3.Connection, *, paper_key: str,

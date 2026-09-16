@@ -97,40 +97,14 @@ class Settings:
     # 综述类任务通常不需要多轮，可用环境变量或入口参数降到 1。
     study_max_review_rounds: int = 3
 
-    # 本地已知期刊分区表（种子样例，可扩展；完整 JCR 数据需授权订阅）
-    journal_quartiles_seed: dict = field(default_factory=lambda: {
-        "nature": "Q1", "science": "Q1", "cell": "Q1",
-        "the lancet": "Q1", "new england journal of medicine": "Q1",
-        "nature machine intelligence": "Q1",
-        "nature methods": "Q1",
-        "ieee transactions on pattern analysis and machine intelligence": "Q1",
-        "journal of machine learning research": "Q1",
-        "proceedings of the national academy of sciences of the united states of america": "Q1",
-        "nucleic acids research": "Q1",
-        "bioinformatics": "Q1",
-        "plos computational biology": "Q1",
-        "physical review letters": "Q1",
-        "physical review x": "Q1",
-        "european journal of cancer": "Q1",
-        "british journal of cancer": "Q1",
-        "acm computing surveys": "Q1",
-        "ieee transactions on knowledge and data engineering": "Q1",
-        "artificial intelligence": "Q1",
-        "nature communications": "Q1",
-        "scientific reports": "Q2",
-        "plos one": "Q2",
-        "ieee access": "Q2",
-        "frontiers in oncology": "Q2",
-        "peerj": "Q2",
-        "bmc bioinformatics": "Q2",
-        "cancer letters": "Q1",
-        "signal transduction and targeted therapy": "Q1",
-        "cell reports": "Q1",
-        "genome biology": "Q1",
-        "briefings in bioinformatics": "Q1",
-        "computers in biology and medicine": "Q2",
-        "artificial intelligence in medicine": "Q2",
-    })
+    # 期刊分区表来自技能包 packs/skills/journal-quartiles（可用
+    # RA_JOURNAL_QUARTILES 指向的 JSON 覆盖）；此字段仅为兼容保留，
+    # 取值时通过 property 读取包内容，不再内联学科名单。
+    @property
+    def journal_quartiles_seed(self) -> dict:
+        from research_agent import packs
+
+        return packs.journal_quartiles()
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

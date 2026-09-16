@@ -19,7 +19,6 @@ from research_agent.knowledge.preprocess import (
     split_sentences,
 )
 from research_agent.ontology.store import (
-    STRONG_RELATIONS,
     add_event_assertion,
     get_node_id,
     graph_summary,
@@ -28,6 +27,7 @@ from research_agent.ontology.store import (
     cleanup_local_label_nodes,
     descriptive_alias,
     is_local_reference_label,
+    strong_relation_set,
     rebuild_ontology_views,
     register_material,
     upsert_edge,
@@ -211,7 +211,7 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
             model_conf = 0.5
         conf = blend_confidence(model_conf, quality_q, flagged, settings)
         attrs = {"predicate": str(r.get("predicate") or "")}
-        if rtype in STRONG_RELATIONS and conf < settings.strong_edge_min_conf:
+        if rtype in strong_relation_set() and conf < settings.strong_edge_min_conf:
             attrs["candidate"] = True
         prov = [{"paper": paper_key, "evidence": str(r.get("evidence") or "")[:500]}]
         _, is_new = upsert_edge(

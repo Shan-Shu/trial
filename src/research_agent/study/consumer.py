@@ -30,6 +30,7 @@ from research_agent.retrieval.skills import (
 )
 from research_agent.study.events import log_study_event
 from research_agent.study.json_utils import clean_str, parse_json_object
+from research_agent.study.mechanism_lexicon import mechanism_lexicon
 from research_agent.study.model_call import invoke_with_timeout
 from research_agent.study.reaction_operators import (
     OPERATOR_NAMES,
@@ -39,7 +40,7 @@ from research_agent.study.reaction_operators import (
 
 logger = logging.getLogger(__name__)
 
-# 超边类型配额：event 型承载机制/条件叙述，优先保证配额。
+# 超边类型配额：由代码控制的检索预算（与学科无关）
 DEFAULT_HYPEREDGE_QUOTA: dict[str, int] = {
     "event": 120,
     "relation": 30,
@@ -47,29 +48,16 @@ DEFAULT_HYPEREDGE_QUOTA: dict[str, int] = {
     "reaction": 40,
 }
 HYPEREDGE_BRIEF_SCAN = 1500
-# 低信息量的结构型关系：仅作补充，不参与机制排序加分。
-LOW_VALUE_RELATION_LABELS = {
-    "is_a", "part_of", "made_of", "related_to", "used_in", "developed_by",
-    "cites", "published_in", "authored_by",
-}
-MECHANISM_KEYWORDS = (
-    "intermediate", "cation", "anion", "carbene", "nitrene", "radical",
-    "umpolung", "dearomat", "rearrang", "migrat", "insertion", "cyclization",
-    "cyclisation", "annulation", "cascade", "tandem", "activation", "oxidat",
-    "reduct", "eliminat", "coordinat", "ligand", "enantio", "diastereo",
-    "regio", "chemoselect", "transition state", "mechanism", "catalytic cycle",
-    "bond formation", "bond cleavage", "polarity", "vinyl", "propargyl",
-)
-CONDITION_KEYWORDS = (
-    "equiv", "mol%", "mol %", "temp", "°c", "yield", "equiv.", "dce", "thf",
-    "dcm", "toluene", "dioxane", "dmf", "reflux", "rt", "hours", "min",
-    "ee ", "dr ", "sealed tube", "under argon", "under nitrogen",
-)
 # evidence 归属文本字段；这些 key 里的字符串按“引用 ID”或“描述文本”区分处理。
 _ID_PREFIXES = ("P", "E", "H", "MS", "OP", "GAP", "OC", "FC")
 _ID_PATTERN = re.compile(
     r"^(?:" + "|".join(_ID_PREFIXES) + r")-\d{1,6}(?:-\d{1,4})?$")
 _TOKEN_RE = re.compile(r"[a-z][a-z0-9\-]{2,}")
+
+
+def _lex(domain_kind: str = "") -> dict[str, Any]:
+    """机制词表（技能包 + 领域增补）；未传领域时用通用词表。"""
+    return mechanism_lexicon(domain_kind)
 
 
 def _json_list(raw: Any) -> list:
@@ -286,6 +274,10 @@ def _select_hyperedges(conn: sqlite3.Connection,
         conn, min_confidence=min_confidence, limit=HYPEREDGE_BRIEF_SCAN)
     if not briefs:
         return []
+    lexicon = _lex()
+    mechanism_keywords = tuple(lexicon["mechanism_keywords"])
+    condition_keywords = tuple(lexicon["condition_keywords"])
+    low_value_labels = set(lexicon["low_value_relation_labels"])
     scored: list[tuple[float, dict[str, Any]]] = []
     for brief in briefs:
         label = brief.get("label") or ""
@@ -294,12 +286,12 @@ def _select_hyperedges(conn: sqlite3.Connection,
         score = float(score_text(tokens, label, 3) + score_text(tokens, names, 1))
         if brief.get("hyperedge_type") == "event":
             score += 1.5
-        mech = _keyword_hits(label, MECHANISM_KEYWORDS)
-        cond = _keyword_hits(label, CONDITION_KEYWORDS)
+        mech = _keyword_hits(label, mechanism_keywords)
+        cond = _keyword_hits(label, condition_keywords)
         score += 2.0 * min(mech, 4)
         score += 0.5 * min(cond, 2)
         if brief.get("hyperedge_type") == "relation" and \
-                label in LOW_VALUE_RELATION_LABELS:
+                label in low_value_labels:
             score -= 3.0
         score += 0.01 * float(brief.get("confidence") or 0)
         scored.append((score, brief))
@@ -352,8 +344,8 @@ def _select_hyperedges(conn: sqlite3.Connection,
         h["paper_keys"] = paper_keys
         h["support_count"] = len(paper_keys)
         h["relevance"] = score_text(tokens, label, 3) + _keyword_hits(
-            text, MECHANISM_KEYWORDS)
-        h["mechanism_score"] = _keyword_hits(text, MECHANISM_KEYWORDS)
+            text, mechanism_keywords)
+        h["mechanism_score"] = _keyword_hits(text, mechanism_keywords)
         out.append(h)
     out.sort(key=lambda x: (x.get("mechanism_score", 0), x.get("relevance", 0),
                             x.get("support_count", 0), x.get("confidence", 0)),
@@ -677,112 +669,72 @@ def normalize_consumer_output(data: dict[str, Any] | None,
 
 
 # ---------------------------------------------------------------- 离线兜底设计上下文
-
-_ACTIVATION_RULES = (
-    ("Lewis acid activation", ("lewis acid", "sc(otf)", "bf3", "b(c6f5)3", "alcl3")),
-    ("Brønsted acid activation", ("tsoh", "tfoh", "acid-promoted", "brønsted")),
-    ("π-acid / carbophilic activation", ("gold", "au(i)", "au(iii)", "platinum",
-                                         "silver", "π-acid")),
-    ("transition-metal C–H activation", ("c-h activation", "c–h activation",
-                                         "rhodium", "rh(iii)", "palladium", "pd(ii)")),
-    ("base-mediated deprotonation", ("k2co3", "cs2co3", "dbu", "base-mediated",
-                                     "naoh", "kotbu")),
-    ("photoredox / radical initiation", ("photoredox", "visible light", "irradiation",
-                                         "single-electron", "radical initiator")),
-    ("electrochemical oxidation", ("electrochem", "electrolysis", "anodic")),
-    ("thermal / no catalyst", ("thermal", "metal-free", "heating", "neat")),
-)
-_INTERMEDIATE_RULES = (
-    ("vinyl cation", ("vinyl cation", "vinylcarbene")),
-    ("metal carbene", ("carbene", "gold carbene", "α-imino")),
-    ("keteniminium ion", ("keteniminium", "ketenimine")),
-    ("metal vinylidene", ("vinylidene",)),
-    ("nitrenium / nitrene", ("nitrenium", "nitrene")),
-    ("azaheptatrienyl cation", ("azaheptatrienyl", "6π-electrocyclization")),
-    ("radical intermediate", ("radical", "single-electron transfer", "set ")),
-    ("zwitterion / ylide", ("zwitterion", "ylide")),
-    ("metallacycle", ("metallacycle", "rhodacycle", "palladacycle", "metalacycle")),
-    ("cyclobutane / cyclopropane intermediate", ("cyclobutane", "cyclopropane",
-                                                 "bicyclobutane", "bcb")),
-    ("σ-alkyl / vinyl metal species", ("vinyl metal", "σ-alkyl", "organometallic")),
-)
-_BOND_CHANGE_RULES = (
-    "C-N formation", "C-C formation", "C-O formation", "C-S formation",
-    "C-H activation", "C-C cleavage", "C-N cleavage", "N-N formation",
-    "ring formation", "ring opening", "C-X formation",
-)
-_SELECTIVITY_RULES = (
-    ("chiral ligand control", ("chiral ligand", "phosphoramidite", "bisphosphine",
-                               "box ligand", "pybox")),
-    ("chiral catalyst control", ("chiral catalyst", "chiral phosphoric acid",
-                                 "chiral rhodium", "chiral iridium")),
-    ("substrate control", ("substrate control", "steric", "electronic effect")),
-    ("directing-group control", ("directing group", "chelation", "dg ")),
-    ("regioselectivity by electronics", ("regioselectiv", "regio-")),
-    ("diastereoselectivity", ("diastereoselectiv", "dr ", "trans-selectiv")),
-)
-_RISK_RULES = (
-    ("原型不兼容风险", ("conflict", "incompatible", "decompos")),
-    ("选择性难以控制", ("poor selectivity", "mixture", "racemiz", "erosion")),
-    ("催化剂/配体成本与前例稀缺", ("expensive", "rare", "not reported")),
-)
-_HARD_CONSTRAINT_HINTS = (
-    "氮", "环", "拓扑", "氮原子", "骨架", "选择性", "原子经济", "步骤",
-    "scale", "yield", "ee", "dr", "step", "ring", "nitrogen", "scaffold",
-)
-_OPERATOR_KEYWORDS = {
-    "polarity_reversal": ("umpolung", "polarity", "polarity reversal",
-                          "nucleophilic", "d3", "acyl anion"),
-    "dearomatization": ("dearomat", "dearomative", "rearomat"),
-    "strain_release": ("strain", "bicyclobutane", "cyclopropane", "ring strain"),
-    "transient_directing": ("transient", "reversible", "hemilabile"),
-    "carbene_migration": ("carbene", "migration", "doyle", "kirmse"),
-    "radical_polar_crossover": ("radical", "polar crossover", "set ", "photoredox"),
-    "dual_catalysis_relay": ("dual catalyst", "relay", "cooperative catalys",
-                             "bimetallic"),
-    "selectivity_lock": ("enantio", "diastereo", "regio", "chiral", "atropisomer"),
-    "intermediate_capture": ("intermediate", "trapping", "trap", "capture"),
-    "ring_contraction_expansion": ("ring contraction", "ring expansion",
-                                   "ring-opening", "ring opening"),
-    "bond_migration": ("migration", "shift", "1,2-", "1,3-"),
-    "heteroatom_insertion": ("insertion", "nitrogen transfer", "amination",
-                             "sulfonylation"),
-    "dynamic_kinetic_resolution": ("dynamic kinetic", "dkr", "racemization"),
-    "switchable_valence": ("switchable", "valence", "au(i)/au(iii)", "redox switch"),
-    "cascade_termination": ("cascade", "tandem", "termination", "interrupted"),
-}
+#
+# 本节的机制/条件/算子规则全部来自可加载的机制词表
+# （`packs/skills/mechanism-keywords` + `packs/domains/<kind>/vocab/mechanism.jsonl`），
+# 代码里不再内联任何学科词表。缺失时由 mechanism_lexicon 显式告警。
 
 
-def _match_rule(text: str, rules) -> str:
-    low = (text or "").lower()
-    for name, keys in rules:
-        if any(k in low for k in keys):
-            return name
-    return ""
+class MechanismRules:
+    """一次机制抽取所用的规则集合（词表快照）。"""
+
+    def __init__(self, domain_kind: str = "") -> None:
+        lex = _lex(domain_kind)
+        self.domain_kind = domain_kind
+        self.mechanism_keywords: tuple[str, ...] = tuple(lex["mechanism_keywords"])
+        self.condition_keywords: tuple[str, ...] = tuple(lex["condition_keywords"])
+        self.low_value_labels: set[str] = set(lex["low_value_relation_labels"])
+        self.bond_change_rules: tuple[str, ...] = tuple(lex["bond_change_rules"])
+        self.hard_constraint_hints: tuple[str, ...] = tuple(lex["hard_constraint_hints"])
+        self.activation_rules = tuple(lex["activation_rules"])
+        self.intermediate_rules = tuple(lex["intermediate_rules"])
+        self.selectivity_rules = tuple(lex["selectivity_rules"])
+        self.risk_rules = tuple(lex["risk_rules"])
+        self.operator_keywords: dict[str, tuple[str, ...]] = {
+            k: tuple(v) for k, v in lex["operator_keywords"].items()}
+
+    # --- 规则匹配 -------------------------------------------------
+    def match(self, text: str, rules) -> str:
+        low = (text or "").lower()
+        for name, keys in rules:
+            if any(k in low for k in keys):
+                return str(name)
+        return ""
+
+    def hits(self, text: str, rules) -> list[str]:
+        low = (text or "").lower()
+        return [str(name) for name, keys in rules if any(k in low for k in keys)]
+
+    def bond_changes(self, text: str) -> list[str]:
+        low = (text or "").lower()
+        return [b for b in self.bond_change_rules if b.lower() in low][:4]
+
+    def keyword_hits(self, text: str, keywords) -> int:
+        low = (text or "").lower()
+        return sum(1 for k in keywords if k in low)
+
+    def looks_mechanistic(self, text: str) -> int:
+        low = (text or "").lower()
+        return (3 * self.keyword_hits(low, self.mechanism_keywords)
+                + 2 * self.keyword_hits(low, self.condition_keywords)
+                + len(self.bond_changes(low)))
+
+    def mechanism_hypothesis(self, text: str) -> str:
+        parts = [x for x in (self.match(text, self.activation_rules),
+                             self.match(text, self.intermediate_rules)) if x]
+        return " + ".join(parts)
+
+    def operator_names_for(self, text: str) -> list[str]:
+        low = (text or "").lower()
+        return [name for name, keys in self.operator_keywords.items()
+                if any(k in low for k in keys)]
 
 
-def _rule_hits(text: str, rules) -> list[str]:
-    low = (text or "").lower()
-    return [name for name, keys in rules if any(k in low for k in keys)]
-
-
-def _bond_changes(text: str) -> list[str]:
-    low = (text or "").lower()
-    return [b for b in _BOND_CHANGE_RULES if b.lower() in low][:4]
-
-
-def _looks_mechanistic(text: str) -> int:
-    low = (text or "").lower()
-    return (3 * _keyword_hits(low, MECHANISM_KEYWORDS)
-            + 2 * _keyword_hits(low, CONDITION_KEYWORDS)
-            + len(_bond_changes(low)))
-
-
-def _mechanism_hypothesis(text: str) -> str:
-    activation = _match_rule(text, _ACTIVATION_RULES)
-    intermediate = _match_rule(text, _INTERMEDIATE_RULES)
-    parts = [x for x in (activation, intermediate) if x]
-    return " + ".join(parts)
+def _rules_for(plan: dict[str, Any] | None) -> MechanismRules:
+    plan = plan or {}
+    domain_kind = str((plan.get("domain_profile") or {}).get("domain_kind")
+                      or plan.get("domain_kind") or "")
+    return MechanismRules(domain_kind)
 
 
 def _rows_for_hyperedge(hyperedge: dict[str, Any]) -> list[dict[str, Any]]:
@@ -803,7 +755,8 @@ def _rows_for_hyperedge(hyperedge: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _mechanism_states(items: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+def _mechanism_states(items: list[dict[str, Any]], rules: "MechanismRules",
+                      limit: int = 12) -> list[dict[str, Any]]:
     """确定性机制状态抽取：从 event 超边与证据句归纳，全部绑定真实编号。"""
     candidates: list[dict[str, Any]] = []
     for h in items:
@@ -815,10 +768,10 @@ def _mechanism_states(items: list[dict[str, Any]], limit: int = 12) -> list[dict
         rows = _rows_for_hyperedge(h)
         pooled = " ".join([label, *[r["text"] for r in rows]])
         refs += [r["reference_id"] for r in rows]
-        activation = _match_rule(pooled, _ACTIVATION_RULES)
-        intermediate = _match_rule(pooled, _INTERMEDIATE_RULES)
-        selectivity = _match_rule(pooled, _SELECTIVITY_RULES)
-        bonds = _bond_changes(pooled)
+        activation = rules.match(pooled, rules.activation_rules)
+        intermediate = rules.match(pooled, rules.intermediate_rules)
+        selectivity = rules.match(pooled, rules.selectivity_rules)
+        bonds = rules.bond_changes(pooled)
         if not (activation or intermediate or bonds or selectivity):
             continue
         candidates.append({
@@ -827,11 +780,11 @@ def _mechanism_states(items: list[dict[str, Any]], limit: int = 12) -> list[dict
             "intermediate": intermediate,
             "bond_changes": bonds,
             "selectivity_control": selectivity,
-            "catalyst_cycle": _match_rule(pooled, _ACTIVATION_RULES),
+            "catalyst_cycle": rules.match(pooled, rules.activation_rules),
             "termination": "",
-            "known_side_reactions": _rule_hits(pooled, _RISK_RULES),
+            "known_side_reactions": rules.hits(pooled, rules.risk_rules),
             "label": label,
-            "score": _looks_mechanistic(pooled),
+            "score": rules.looks_mechanistic(pooled),
             "evidence_ids": [r for r in refs if is_reference_id(r)][:6],
         })
     candidates.sort(key=lambda x: (x["score"], len(x["evidence_ids"])), reverse=True)
@@ -864,6 +817,7 @@ def _mechanism_states(items: list[dict[str, Any]], limit: int = 12) -> list[dict
 
 def _reaction_primitives(items: list[dict[str, Any]],
                          states: list[dict[str, Any]],
+                         rules: "MechanismRules",
                          limit: int = 15) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for state in states:
@@ -872,21 +826,20 @@ def _reaction_primitives(items: list[dict[str, Any]],
             state.get("selectivity_control") or "", state.get("label") or "",
             " ".join(state.get("bond_changes") or []),
         ])
-        for name, keys in _OPERATOR_KEYWORDS.items():
-            if any(k in blob.lower() for k in keys):
-                if any(x["name"] == name for x in out):
-                    continue
-                out.append({
-                    "op_id": f"OP-{len(out) + 1:04d}",
-                    "name": name,
-                    "label_zh": OPERATOR_NAMES.get(name, name),
-                    "input_state": state.get("start_state") or state.get("label") or "",
-                    "output_state": state.get("intermediate")
-                    or (state.get("bond_changes") or [""])[0],
-                    "evidence_ids": state.get("evidence_ids") or [],
-                    "hyperedge_ids": state.get("hyperedge_ids") or [],
-                })
-                break
+        for name in rules.operator_names_for(blob):
+            if any(x["name"] == name for x in out):
+                continue
+            out.append({
+                "op_id": f"OP-{len(out) + 1:04d}",
+                "name": name,
+                "label_zh": OPERATOR_NAMES.get(name, name),
+                "input_state": state.get("start_state") or state.get("label") or "",
+                "output_state": state.get("intermediate")
+                or (state.get("bond_changes") or [""])[0],
+                "evidence_ids": state.get("evidence_ids") or [],
+                "hyperedge_ids": state.get("hyperedge_ids") or [],
+            })
+            break
     if out:
         return out[:limit]
     for h in items:
@@ -966,6 +919,7 @@ def _opportunity_gaps(items: list[dict[str, Any]],
 
 def _operator_candidates(states: list[dict[str, Any]],
                          primitives: list[dict[str, Any]],
+                         rules: "MechanismRules",
                          limit: int = 8) -> list[dict[str, Any]]:
     """算子链候选：把机制状态串成"起始→中间体→选择性锁定"的算子序列。"""
     out: list[dict[str, Any]] = []
@@ -975,13 +929,12 @@ def _operator_candidates(states: list[dict[str, Any]],
             state.get("activation_mode") or "", state.get("intermediate") or "",
             state.get("label") or "", " ".join(state.get("bond_changes") or []),
         ]).lower()
-        for name, keys in _OPERATOR_KEYWORDS.items():
-            if any(k in blob for k in keys):
-                chain.append({"operator": name,
-                              "operator_label": OPERATOR_NAMES.get(name, name),
-                              "input": state.get("start_state") or "",
-                              "output": state.get("intermediate")
-                              or (state.get("bond_changes") or [""])[0]})
+        for name in rules.operator_names_for(blob):
+            chain.append({"operator": name,
+                          "operator_label": OPERATOR_NAMES.get(name, name),
+                          "input": state.get("start_state") or "",
+                          "output": state.get("intermediate")
+                          or (state.get("bond_changes") or [""])[0]})
         if state.get("selectivity_control"):
             name = "selectivity_lock"
             chain.append({"operator": name,
@@ -1030,6 +983,7 @@ def _operator_candidates(states: list[dict[str, Any]],
 def _constraint_conflicts(states: list[dict[str, Any]],
                           items: list[dict[str, Any]],
                           plan: dict[str, Any] | None,
+                          rules: "MechanismRules",
                           limit: int = 8) -> list[dict[str, Any]]:
     plan = plan or {}
     constraints = ((plan.get("design_contract") or {}).get("target_constraints")
@@ -1053,7 +1007,7 @@ def _constraint_conflicts(states: list[dict[str, Any]],
             break
     for h in items[:limit]:
         label = clean_str(h.get("label"), "")
-        mech = _keyword_hits(label, MECHANISM_KEYWORDS)
+        mech = rules.keyword_hits(label, rules.mechanism_keywords)
         cond_missing = not (h.get("conditions") or [])
         if not mech or not cond_missing:
             continue
@@ -1070,16 +1024,20 @@ def _constraint_conflicts(states: list[dict[str, Any]],
 
 def deterministic_design_context(knowledge: dict[str, Any],
                                  plan: dict[str, Any] | None = None) -> dict[str, Any]:
-    """离线兜底：用同一套五键结构从超边/模式卡归纳设计上下文。"""
+    """离线兜底：用同一套五键结构从超边/模式卡归纳设计上下文。
+
+    规则来自 `packs`：通用词表 + 由 `plan.domain_profile.domain_kind` 选定的领域增补。
+    """
+    rules = _rules_for(plan)
     items = sorted(knowledge.get("hyperedges") or [],
                    key=lambda h: (h.get("mechanism_score", 0),
                                   h.get("relevance", 0),
                                   h.get("support_count", 0)), reverse=True)
-    states = _mechanism_states(items)
-    primitives = _reaction_primitives(items, states)
+    states = _mechanism_states(items, rules)
+    primitives = _reaction_primitives(items, states, rules)
     gaps = _opportunity_gaps(items, states, plan)
-    ops = _operator_candidates(states, primitives)
-    conflicts = _constraint_conflicts(states, items, plan)
+    ops = _operator_candidates(states, primitives, rules)
+    conflicts = _constraint_conflicts(states, items, plan, rules)
     return normalize_design_context({
         "mechanism_states": states,
         "reaction_primitives": primitives,

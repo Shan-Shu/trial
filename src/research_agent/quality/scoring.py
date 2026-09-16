@@ -15,10 +15,18 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from research_agent import packs
 from research_agent.config import Settings, settings as default_settings
 
 
-QUARTILE_SCORE = {"Q1": 0.95, "Q2": 0.80, "Q3": 0.65, "Q4": 0.50}
+def _quartile_scores() -> dict[str, float]:
+    """分区 → 权威性分值（来自 packs/skills/journal-quartiles）。"""
+    scores = packs.quartile_scores()
+    if not scores:
+        packs.warn_once("quartile-scores-missing",
+                        "未加载 packs/skills/journal-quartiles 的 quartile_scores；"
+                        "分区命中时不加权威性分")
+    return scores
 
 
 def normalize_venue_name(name: str | None) -> str | None:
@@ -31,21 +39,22 @@ def venue_factor(rec: dict[str, Any],
                  settings: Settings | None = None) -> tuple[float, str | None, str]:
     """权威性子项1：期刊/出版社分级（JCR/SCI 分区）→ [0,1]。
 
-    优先使用 OpenAlex/Crossref 返回的真实来源名匹配本地分区表；
-    arXiv 等预印本仓库按预印本处理（中性偏低，等正式发表后补全可提升）。
+    分区数据来自技能包（可按学科用 RA_JOURNAL_QUARTILES 覆盖）；
+    命中分区才加分，未命中按来源类型给中性值，不做"未知=低分"的猜测。
     """
     settings = settings or default_settings
+    scores = _quartile_scores()
     name = normalize_venue_name(rec.get("venue"))
     quartile = (rec.get("venue_quartile") or "").upper() or None
     note = ""
     if quartile:
         pass
     elif name and name != "arxiv":
-        quartile = settings.journal_quartiles_seed.get(name)
+        quartile = packs.journal_quartiles().get(name)
         if quartile:
-            note = f"本地分区表匹配: {quartile}"
-    if quartile in QUARTILE_SCORE:
-        return QUARTILE_SCORE[quartile], quartile, note or f"分区 {quartile}"
+            note = f"分区表匹配: {quartile}"
+    if quartile and quartile in scores:
+        return scores[quartile], quartile, note or f"分区 {quartile}"
     source_type = (rec.get("source_type") or "").lower()
     if name and name == "arxiv":
         return 0.5, None, "arXiv 预印本（中性）"

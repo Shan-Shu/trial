@@ -40,7 +40,7 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
     {
       "type": "受控类型；从下方类型列表选择，若确有必要才新造英文 CamelCase",
       "name": "规范名：优先复用库中已有规范名；否则使用该领域最标准、无歧义的写法",
-      "aliases": ["该实体在文中出现的其它写法/缩写，如 RAG、additive manufacturing"],
+      "aliases": ["该实体在文中出现的其它写法/缩写，如 abbreviated-form、中文全称"],
       "attributes": {"属性名": "值", "属性名2": "值2"},
       "confidence": 0.0,
       "evidence": "支撑该实体的原句（可截断，≤300字符）"
@@ -50,7 +50,7 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
     {
       "type": "受控词表中的关系词（必须按同义归一规则选择）",
       "subject": "entities.name 或库中已有规范名（必须与 entities 列表中 name 完全一致）",
-      "predicate": "一句话补述，不要与 type 重复表达同一动词，例如 type=uses 时 predicate 可为 '用于合成骨支架'",
+      "predicate": "一句话补述，不要与 type 重复表达同一动词，例如 type=uses 时 predicate 可为 '用于…场景'",
       "object": "entities.name 或库中已有规范名（必须与 entities 列表中 name 完全一致）",
       "confidence": 0.0,
       "evidence": "支撑原句（可截断，≤300字符）"
@@ -102,10 +102,10 @@ moderator, mediator, outcome, comparison, location, time, evidence。
 2. 每个实体尽量至少出现在一条 relation 或 event 中；确实无法关联的才作为孤立实体输出。
 3. 同一概念合并：若论文中的某个概念与库中已有规范名是同一事物（包括其别名、缩写），
    则 name 必须直接复用库中规范名，并将本文中的写法加入 aliases 数组。例如库中已有
-   "Method: Retrieval-Augmented Generation"，论文中写 "RAG"，则 name 应为
-   "Retrieval-Augmented Generation"，aliases 包含 "RAG"。
+   "Method: <规范全称>"，论文中写 "<缩写>"，则 name 应为
+   "<规范全称>"，aliases 包含 "<缩写>"。
 4. 实体命名：优先使用领域通用、无歧义的标准名称；缩写需在 name 或 aliases 中给出全称。
-   例如 name 可为 "Poly(lactic-co-glycolic acid)"，aliases 含 "PLGA"。
+   例如 name 可为 "<全称>"，aliases 含 "<缩写>"。
 5. 置信度标尺：0.9+ 多句/多段交叉印证；0.75~0.89 原文单句直接支持；0.6~0.74 由上下文明确推断；
    <0.6 存疑尽量不输出。
 6. evidence 必须引用原文句子（可节选），不得改写或总结，长度≤300字符。
