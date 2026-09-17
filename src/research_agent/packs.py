@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -382,49 +383,105 @@ def canonical_relation_type(relation_type: str) -> str:
 
 # ------------------------------------------------------------------ 期刊分区
 
+_JOURNAL_PUNCT_RE = re.compile(r"[\-_/\\.,;:'\"()\[\]{}]+")
+_JOURNAL_NOISE_RE = re.compile(
+    r"\b(?:international edition|int ed|in english|the|and)\b")
+# 可安全丢弃的副标题/别名括号（避免"包含匹配"误命中）
+_JOURNAL_TRAILING_PAREN_RE = re.compile(
+    r"\((?:[^()]*(?:jacs|international|english|edition|series [ab]|"
+    r"new york|london|print|online)[^()]*)\)")
+
+
+def normalize_journal_key(name: str | None) -> str:
+    """期刊名归一：大小写、标点、连字符、副标题括号与常见词缀统一。
+
+    目的：让库中的 ``Angewandte Chemie (International ed. in English)`` 与
+    JCR 的 ``ANGEWANDTE CHEMIE-INTERNATIONAL EDITION`` 命中同一条目。
+    """
+    text = str(name or "").strip().lower()
+    if not text:
+        return ""
+    text = _JOURNAL_TRAILING_PAREN_RE.sub(" ", text)
+    text = text.replace("&", " and ")
+    text = _JOURNAL_PUNCT_RE.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = _JOURNAL_NOISE_RE.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _merge_quartile_payload(target: dict[str, str], payload: Any) -> int:
+    """把一份分区载荷并入 target；兼容平铺字典与 ``{"quartiles": {...}}`` 包装。"""
+    if not isinstance(payload, dict):
+        return 0
+    inner = payload.get("quartiles")
+    data = inner if isinstance(inner, dict) else payload
+    added = 0
+    for key, value in data.items():
+        if not isinstance(value, str):
+            continue
+        quartile = value.strip().upper()
+        if quartile not in ("Q1", "Q2", "Q3", "Q4"):
+            continue
+        normalized = normalize_journal_key(key)
+        if normalized:
+            target[normalized] = quartile
+            added += 1
+    return added
+
+
 def journal_quartiles() -> dict[str, str]:
     """期刊分区：技能包内置种子 + 分科补充文件 + 环境变量指向的外部覆盖文件。
 
     合并顺序（后者覆盖前者）：
     1. `packs/skills/journal-quartiles/content/data.json` 的 `quartiles`（跨学科顶刊）；
-    2. 同一技能包 `content/quartiles_*.json`（按学科补充，如 `quartiles_chemistry.json`）；
-    3. `RA_JOURNAL_QUARTILES` 指向的 JSON 文件（本地/机构自备表）。
+    2. 同一技能包 `content/quartiles_*.json`（按学科补充，如 `quartiles_chemistry.json`，
+       可由 `examples/import_jcr_xlsx.py` 从 JCR 名单生成）；
+    3. `RA_JOURNAL_QUARTILES` 指向的 JSON 文件（全量 JCR 表等本地数据）。
+
+    所有键都经 :func:`normalize_journal_key` 归一，查询请用 :func:`journal_quartile`。
     """
     merged: dict[str, str] = {}
     data = skill_data("journal-quartiles")
-    seed = data.get("quartiles") if isinstance(data.get("quartiles"), dict) else {}
-    merged.update({str(k).lower(): str(v).upper() for k, v in seed.items()})
+    _merge_quartile_payload(merged, data.get("quartiles"))
     base = skill_dir("journal-quartiles")
     if base is not None:
         for path in sorted((base / "content").glob("quartiles_*.json")):
-            extra = _read_json(path)
-            if isinstance(extra, dict):
-                merged.update({str(k).lower(): str(v).upper()
-                               for k, v in extra.items()})
-            elif isinstance(extra, dict) is False and extra is not None:
-                # 兼容 {"quartiles": {...}} 包装
-                inner = extra.get("quartiles") if isinstance(extra, dict) else None
-                if isinstance(inner, dict):
-                    merged.update({str(k).lower(): str(v).upper()
-                                   for k, v in inner.items()})
+            _merge_quartile_payload(merged, _read_json(path))
     override = os.getenv("RA_JOURNAL_QUARTILES")
     if override:
-        path = Path(override)
-        if path.is_file():
-            loaded = _read_json(path)
-            if isinstance(loaded, dict):
-                inner = loaded.get("quartiles") if isinstance(
-                    loaded.get("quartiles"), dict) else loaded
-                merged.update({str(k).lower(): str(v).upper()
-                               for k, v in inner.items()})
-        else:
-            warn_once(f"journal-override:{override}",
-                      "RA_JOURNAL_QUARTILES 指向的文件不存在: %s", override)
+        for raw in override.split(os.pathsep):
+            path = Path(raw)
+            if not raw.strip():
+                continue
+            if path.is_file():
+                _merge_quartile_payload(merged, _read_json(path))
+            else:
+                warn_once(f"journal-override:{raw}",
+                          "RA_JOURNAL_QUARTILES 指向的文件不存在: %s", raw)
     if not merged:
         warn_once("journal-empty",
                   "期刊分区表为空（packs/skills/journal-quartiles 缺失）；"
                   "权威性评分将只依赖 H 指数与引用数")
     return merged
+
+
+def journal_quartile(name: str | None,
+                     table: dict[str, str] | None = None) -> str | None:
+    """按归一化后的期刊名查分区；未命中返回 None。"""
+    key = normalize_journal_key(name)
+    if not key:
+        return None
+    quartiles = table if table is not None else journal_quartiles()
+    hit = quartiles.get(key)
+    if hit:
+        return hit
+    # 退化匹配：仅当一方是另一方的完整子串且长度足够时接受（副标题差异）
+    for candidate, quartile in quartiles.items():
+        if len(candidate) < 12:
+            continue
+        if candidate in key or key in candidate:
+            return quartile
+    return None
 
 
 def quartile_scores() -> dict[str, float]:

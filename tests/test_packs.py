@@ -84,10 +84,26 @@ class PackLayerTest(unittest.TestCase):
         self.assertGreater(scores["Q1"], scores["Q2"])
 
     def test_unknown_journal_is_neutral_not_penalized(self):
+        # 用确定不会被任何分区表命中的名字（避免 .env 里的全量 JCR 表干扰）
         factor, quartile, _ = venue_factor(
-            {"venue": "Some Unknown Journal", "source_type": "journal"})
+            {"venue": "Zzz Nonexistent Journal Of Nothing",
+             "source_type": "journal"})
         self.assertIsNone(quartile)
         self.assertGreaterEqual(factor, 0.5)
+
+    def test_jcr_seeded_chemistry_journals_resolve(self):
+        """P0-6 验收：内置 JCR 化学子集能让本领域期刊拿到分区。"""
+        for venue, expected in (
+                ("Journal of the American Chemical Society", "Q1"),
+                ("Angewandte Chemie (International ed. in English)", "Q1"),
+                ("Organic Letters", "Q1"),
+                ("Chemical Science", "Q1"),
+                ("ACS Catalysis", "Q1")):
+            factor, quartile, _ = venue_factor(
+                {"venue": venue, "source_type": "journal"})
+            self.assertEqual(quartile, expected,
+                             f"{venue} 未命中分区表（P0-6 回归）")
+            self.assertGreaterEqual(factor, 0.8)
 
     def test_planner_hints_from_pack(self):
         self.assertEqual(infer_task_kind("写一份 RAG 综述"), "summary")
@@ -101,6 +117,62 @@ class PackLayerTest(unittest.TestCase):
         self.assertIsNotNone(hit)
         self.assertEqual(hit["external_id"], "CHEBI:15377")
         self.assertIsNone(lookup_identity("完全不存在的术语XYZ"))
+
+
+class RelevanceGatePolicyTest(unittest.TestCase):
+    """P1-6 策略 C：词元不可判定 / 中文主题 + 英文语料时不整批误杀。"""
+
+    def setUp(self):
+        from research_agent.retrieval.node import apply_topic_relevance_gate
+
+        self.gate = apply_topic_relevance_gate
+        self.records = [
+            {"paper_key": "a", "title": "Ynamide annulation to azacycles",
+             "abstract": "Copper-catalyzed annulation of ynamides."},
+            {"paper_key": "b", "title": "Gold catalysis of ynamides",
+             "abstract": "Gold carbene intermediates."},
+        ]
+
+    def test_abbreviation_topic_is_tokenized(self):
+        from research_agent.retrieval.node import _topic_tokens
+
+        self.assertEqual(_topic_tokens(["RAG"]), {"rag"})
+        self.assertEqual(_topic_tokens(["DNA repair"]), {"dna", "repair"})
+
+    def test_abbreviation_topic_gate_binds(self):
+        """缩写主题不再因"切不出 token"而整批放行。"""
+        kept, dropped = self.gate(
+            [{"paper_key": "x", "title": "RAG for question answering",
+              "abstract": "Retrieval augmented generation improves QA."},
+             {"paper_key": "y", "title": "Liposomal doxorubicin in mice",
+              "abstract": "Stealth liposomes avoid the reticuloendothelial system."}],
+            ["RAG"], on_low_signal="warn")
+        self.assertEqual([r["paper_key"] for r in kept], ["x"])
+        self.assertEqual([r["paper_key"] for r in dropped], ["y"])
+
+    def test_cjk_topic_with_english_corpus_warns_not_drops(self):
+        kept, dropped = self.gate(self.records, ["炔酰胺"], on_low_signal="warn")
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(dropped, [])
+        self.assertTrue(all(r.get("_gate_low_signal") ==
+                            "cjk_topic_english_corpus" for r in kept))
+
+    def test_cjk_topic_drop_policy_keeps_old_behaviour(self):
+        kept, dropped = self.gate(self.records, ["炔酰胺"], on_low_signal="drop")
+        self.assertEqual(kept, [])
+        self.assertEqual(len(dropped), 2)
+
+    def test_domain_language_records_still_filtered(self):
+        """中文主题 + 中文语料时按正常词元判定（不应被低信号豁免）。"""
+        records = [
+            {"paper_key": "cn1", "title": "炔酰胺合成多元氮杂环的新方法",
+             "abstract": "本文报道炔酰胺参与的环化反应与选择性控制。"},
+            {"paper_key": "cn2", "title": "脂质体药物递送系统研究",
+             "abstract": "本文研究脂质体的体内分布与药代动力学行为。"},
+        ]
+        kept, dropped = self.gate(records, ["炔酰胺"], on_low_signal="warn")
+        self.assertEqual([r["paper_key"] for r in kept], ["cn1"])
+        self.assertEqual([r["paper_key"] for r in dropped], ["cn2"])
 
 
 class PackOverrideTest(unittest.TestCase):
@@ -159,14 +231,16 @@ class PackOverrideTest(unittest.TestCase):
                         or profile["candidate_entity_types"] == [])
 
     def test_journal_override_file(self):
+        # 先屏蔽 .env 里可能存在的全量 JCR 表，确保验证的是"覆盖文件"生效
+        os.environ.pop("RA_JOURNAL_QUARTILES", None)
         path = Path(self.tmp.name) / "jq.json"
         path.write_text(json.dumps({
             "journal of the american chemical society": "Q1"}), encoding="utf-8")
         os.environ["RA_JOURNAL_QUARTILES"] = str(path)
         packs.reset_cache()
         self.assertEqual(
-            packs.journal_quartiles().get(
-                "journal of the american chemical society"), "Q1")
+            packs.journal_quartile("Journal of the American Chemical Society"),
+            "Q1")
         factor, quartile, _ = venue_factor({
             "venue": "Journal of the American Chemical Society",
             "source_type": "journal"})

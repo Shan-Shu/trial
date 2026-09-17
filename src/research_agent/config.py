@@ -1,6 +1,10 @@
 """全局配置：路径、质量评估权重/阈值、学科前沿迭代速度等。
 
 所有阈值都可经环境变量覆盖（见 Settings.from_env）。
+
+注意：本模块在 **import 期** 就要求值模块级 `settings`，因此必须在这里
+先把项目根目录的 `.env` 载入环境，否则 `.env` 中的 `RA_*` 对
+`default_settings` 路径（看板默认库、`settings or default_settings` 兜底处）无效。
 """
 from __future__ import annotations
 
@@ -9,8 +13,19 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+try:  # 可选依赖：缺失时退化为"只读真实环境变量"
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv()  # 兼容从当前工作目录启动的场景
+except Exception:  # noqa: BLE001 —— 配置加载不应因 .env 缺失/损坏而失败
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "未能加载 .env（python-dotenv 缺失或文件不可解析）；"
+        "RA_* 环境变量将只取进程环境")
 
 
 def _env_float(key: str, default: float) -> float:
@@ -97,6 +112,11 @@ class Settings:
     # 综述类任务通常不需要多轮，可用环境变量或入口参数降到 1。
     study_max_review_rounds: int = 3
 
+    # 相关性硬门在"词元无法判定"时的行为（v0.4.3，策略 C）：
+    #   "warn" = 放行并在检索报告里标注低信号（默认，避免中文主题 + 英文库整批误杀）
+    #   "drop" = 沿用旧行为（整批丢弃）
+    relevance_gate_low_signal: str = "warn"
+
     # 期刊分区表来自技能包 packs/skills/journal-quartiles（可用
     # RA_JOURNAL_QUARTILES 指向的 JSON 覆盖）；此字段仅为兼容保留，
     # 取值时通过 property 读取包内容，不再内联学科名单。
@@ -139,6 +159,17 @@ class Settings:
             os.getenv("RA_STUDY_FACT_CHECK_TIMEOUT", s.study_fact_check_timeout))
         s.study_max_review_rounds = int(
             os.getenv("RA_STUDY_MAX_REVIEW_ROUNDS", s.study_max_review_rounds))
+        gate = os.getenv("RA_RELEVANCE_GATE_LOW_SIGNAL")
+        if gate and gate.strip().lower() in ("warn", "drop"):
+            s.relevance_gate_low_signal = gate.strip().lower()
+        s.q_flag_penalty = _env_float("RA_Q_FLAG_PENALTY", s.q_flag_penalty)
+        s.max_extract_chars = int(
+            os.getenv("RA_MAX_EXTRACT_CHARS", s.max_extract_chars))
+        s.max_extract_chunks = int(
+            os.getenv("RA_MAX_EXTRACT_CHUNKS", s.max_extract_chunks))
+        s.strong_edge_min_conf = _env_float(
+            "RA_STRONG_EDGE_MIN_CONF", s.strong_edge_min_conf)
+        s.http_timeout = int(os.getenv("RA_HTTP_TIMEOUT", s.http_timeout))
         s.global_merge_enabled = _env_bool("RA_GLOBAL_MERGE", s.global_merge_enabled)
         s.global_merge_interval_nodes = int(os.getenv(
             "RA_GLOBAL_MERGE_INTERVAL_NODES", s.global_merge_interval_nodes))

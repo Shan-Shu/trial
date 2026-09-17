@@ -50,7 +50,7 @@ def venue_factor(rec: dict[str, Any],
     if quartile:
         pass
     elif name and name != "arxiv":
-        quartile = packs.journal_quartiles().get(name)
+        quartile = packs.journal_quartile(name)
         if quartile:
             note = f"分区表匹配: {quartile}"
     if quartile and quartile in scores:

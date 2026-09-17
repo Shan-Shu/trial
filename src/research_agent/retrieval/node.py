@@ -105,7 +105,8 @@ def _process_records(
 def apply_topic_relevance_gate(records: list[dict],
                                topic_terms: list[str] | None,
                                *,
-                               min_overlap: int = 1) -> tuple[list[dict], list[dict]]:
+                               min_overlap: int = 1,
+                               on_low_signal: str = "drop") -> tuple[list[dict], list[dict]]:
     """领域相关性硬门：把明显跨域的命中挡在入库之前。
 
     背景：语料一旦混入跨域论文（例如炔酰胺任务里混进脂质体/疟疾文献），
@@ -114,15 +115,33 @@ def apply_topic_relevance_gate(records: list[dict],
     规则（保守优先，避免误杀）：
     - records 的 title/abstract/keywords 文本过短（< 30 字符）视为不可判定，放行；
     - 长文本记录必须与 topic_terms 有至少 ``min_overlap`` 个词元重叠；
-    - 词元按拉丁词（≥4 字符）与中文字符串（≥2 字）切分，忽略停用词。
+    - 词元按拉丁词（≥4 字符）、全大写缩写（≥2 字符）与中文字符串（≥2 字）切分。
+
+    ``on_low_signal`` 决定"词元无法判定"时的行为（v0.4.3，策略 C）：
+
+    - ``"drop"``：按原逻辑当作可判定（会整批丢弃，**不推荐**用于中文主题 + 英文库）；
+    - ``"warn"``：放行全部记录并在返回值里标注 ``gate_low_signal``，
+      表示"门控未能判定，请人工/上游补充英文检索词"。
+
+    返回值 ``(kept, dropped)``；被丢弃的记录带 ``_gate_reason``。
     """
     if not topic_terms:
         return list(records), []
     tokens = _topic_tokens(topic_terms)
-    if not tokens:
-        return list(records), []
     kept: list[dict] = []
     dropped: list[dict] = []
+    if not tokens:
+        # 例如主题只有 2–3 字母缩写或全是停用词：门控无从判定
+        if on_low_signal == "warn":
+            return [_mark_low_signal(r, "no_tokens") for r in records], []
+        return list(records), []
+    # 词元全是非拉丁（中文主题）而语料是英文时，硬门必然整批误杀 → 降级为告警
+    if on_low_signal == "warn" and not any(_LATIN_TOKEN_RE.search(t)
+                                           for t in tokens):
+        english_like = sum(1 for r in records if _looks_english(r))
+        if english_like >= max(1, len(records) // 2):
+            reason = "cjk_topic_english_corpus"
+            return [_mark_low_signal(r, reason) for r in records], []
     for rec in records:
         text = " ".join([
             str(rec.get("title") or ""),
@@ -147,22 +166,42 @@ def apply_topic_relevance_gate(records: list[dict],
     return kept, dropped
 
 
+def _mark_low_signal(rec: dict, reason: str) -> dict:
+    return {**rec, "_gate_low_signal": reason}
+
+
+def _looks_english(rec: dict) -> bool:
+    text = " ".join([str(rec.get("title") or ""),
+                     str(rec.get("abstract") or "")])
+    latin = len(re.findall(r"[A-Za-z]", text))
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+    return latin > max(20, cjk * 2)
+
+
 _STOPWORDS = {
     "the", "and", "for", "with", "from", "into", "that", "this", "these",
     "those", "study", "studies", "using", "used", "based", "novel", "new",
     "review", "research", "results", "analysis", "method", "methods",
     "effect", "effects", "role", "roles", "via", "toward", "towards",
 }
-_TOKEN_RE = re.compile(r"[a-z]{4,}|[\u4e00-\u9fff]{2,}")
+# 拉丁词（≥4 字符）｜全大写缩写（2–5 字符，如 RAG/DNA/LLM/MOF）｜中文（≥2 字）
+_TOKEN_RE = re.compile(r"[a-z]{4,}|[A-Z]{2,5}(?![a-z])|[\u4e00-\u9fff]{2,}")
+_LATIN_TOKEN_RE = re.compile(r"[a-z]", re.I)
 
 
 def _topic_tokens(terms: list[str]) -> set[str]:
+    """把主题词切成可判定 token（小写化）。
+
+    注意：全大写缩写先按原样匹配再小写化，避免 `RAG` 被 `[a-z]{4,}` 漏掉。
+    """
     tokens: set[str] = set()
     for term in terms:
-        for token in _TOKEN_RE.findall(str(term or "").lower()):
-            if token in _STOPWORDS:
+        text = str(term or "")
+        for token in _TOKEN_RE.findall(text):
+            lowered = token.lower()
+            if lowered in _STOPWORDS:
                 continue
-            tokens.add(token)
+            tokens.add(lowered)
     return tokens
 
 
@@ -208,7 +247,14 @@ def ingest_search_results(
         if not records:
             records = api.search(query, max_results=max_results)
         gate_terms = list(topic_terms or []) or [query, *(dimensions or [])]
-        records, dropped = apply_topic_relevance_gate(records, gate_terms)
+        policy = str(getattr(settings, "relevance_gate_low_signal", "warn"))
+        records, dropped = apply_topic_relevance_gate(
+            records, gate_terms, on_low_signal=policy)
+        low_signals = {}
+        for rec in records:
+            reason = rec.pop("_gate_low_signal", None)
+            if reason:
+                low_signals[reason] = low_signals.get(reason, 0) + 1
         out = _process_records(
             records,
             retriever=retriever,
@@ -217,17 +263,27 @@ def ingest_search_results(
             query=query,
             queries=queries,
         )
+        gate_report: dict[str, Any] = {
+            "considered": len(records) + len(dropped),
+            "kept": len(records),
+            "dropped": len(dropped),
+            "topics": gate_terms[:6],
+        }
+        if low_signals:
+            gate_report["low_signal"] = low_signals
+            gate_report["hint"] = (
+                "门控未能判定相关性（主题词元与语料语言/形式不匹配），已按策略"
+                "放行；建议补充目标语言的检索词")
         if dropped:
-            out["relevance_gate"] = {
-                "dropped": len(dropped),
-                "topics": gate_terms[:6],
-                "examples": [
-                    {"paper_key": d.get("paper_key"), "title": d.get("title")}
-                    for d in dropped[:5]
-                ],
-            }
-            log_event(conn, "retrieval", "relevance-gate-dropped", None,
-                      out["relevance_gate"])
+            gate_report["examples"] = [
+                {"paper_key": d.get("paper_key"), "title": d.get("title")}
+                for d in dropped[:5]
+            ]
+        if dropped or low_signals:
+            out["relevance_gate"] = gate_report
+            log_event(conn, "retrieval",
+                      "relevance-gate-dropped" if dropped else "relevance-gate-low-signal",
+                      None, gate_report)
         return out
     finally:
         if own_conn:
