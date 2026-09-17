@@ -131,7 +131,8 @@ def _clean_attrs(attrs: dict | None) -> dict[str, Any]:
 def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
                       quality_q: float | None, flagged: bool,
                       paper_key: str, settings: Settings,
-                      evidence_tier: str | None = None) -> dict[str, Any]:
+                      evidence_tier: str | None = None,
+                      paper_text: str = "") -> dict[str, Any]:
     """把一次抽取结果写入本体，返回统计（新增节点/边/类型）。"""
     stats = {"entities": 0, "relations": 0, "events": 0,
              "hyperedges": 0, "new_nodes": 0, "new_edges": 0,
@@ -344,6 +345,19 @@ def _upsert_knowledge(conn: sqlite3.Connection, data: dict[str, Any], *,
         else:
             evidence_items = [{"paper": paper_key,
                                "evidence": str(evidence_value or "")[:500]}]
+        # 证据定位：把证据句在原文中的字符区间写进 provenance（P2-3）。
+        # 抽取层只给句子文本，这里在 clean_text 里回查位置（找不到则留空，
+        # 不猜位置）。
+        for item in evidence_items:
+            span = str(item.get("evidence") or item.get("span_text") or "")
+            if not span:
+                continue
+            item.setdefault("section", None)
+            if item.get("char_start") is None and paper_text:
+                pos = paper_text.find(span[:120])
+                if pos >= 0:
+                    item["char_start"] = pos
+                    item["char_end"] = pos + len(span[:120])
         _, is_new = upsert_hyperedge(
             conn,
             hyperedge_type=htype,
@@ -388,14 +402,19 @@ def make_knowledge_node(model=None,
 
             paragraphs = split_paragraphs(text)
             sentences = split_sentences(text)
+            chunk_stats: dict[str, Any] = {}
             chunks = chunk_paragraphs(
-                paragraphs, settings.max_extract_chars, settings.max_extract_chunks
+                paragraphs, settings.max_extract_chars, settings.max_extract_chunks,
+                stats=chunk_stats,
             )
             pre_stats = {
                 "clean_chars": len(text),
                 "paragraphs": len(paragraphs),
                 "sentences": len(sentences),
                 "chunks": len(chunks),
+                # 被 max_chunks 截断的量（P2-1：不再静默丢弃）
+                "dropped_chunks": chunk_stats.get("dropped_chunks", 0),
+                "dropped_chars": chunk_stats.get("dropped_chars", 0),
             }
             totals: dict[str, Any] = {"entities": 0, "relations": 0, "events": 0,
                                       "hyperedges": 0, "new_nodes": 0,
@@ -447,15 +466,16 @@ def make_knowledge_node(model=None,
                     totals.setdefault("errors", [])
                     if len(totals["errors"]) < 5:
                         totals["errors"].append(str(chunk_error))
-                chunk_stats = _upsert_knowledge(
+                chunk_result = _upsert_knowledge(
                     db, data if isinstance(data, dict) else {},
                     quality_q=quality_q, flagged=flagged,
                     paper_key=key, settings=settings, evidence_tier=tier,
+                    paper_text=text,
                 )
                 for k in ("entities", "relations", "events", "hyperedges",
                           "new_nodes", "new_edges", "new_hyperedges",
                           "dropped_garbage"):
-                    totals[k] += chunk_stats[k]
+                    totals[k] += chunk_result[k]
                 if refine_stats.get("attempts"):
                     totals["refine_runs"] += 1
                 totals["refine_issues"] += refine_stats.get("issues", 0)

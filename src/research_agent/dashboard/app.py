@@ -14,6 +14,7 @@ from fastapi import Body, FastAPI, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from research_agent import __version__
 from research_agent.config import settings as default_settings
 from research_agent.dashboard import api as dbapi
 
@@ -28,7 +29,7 @@ def create_app(db_path: str | Path | None = None,
     app = FastAPI(
         title="research-agent 看板",
         description="动态本体图谱 + 智能体工作状态 + 输入输出",
-        version="0.4.0",
+        version=__version__,
     )
     app.state.db_path = _db
     app.state.inject_llms = bool(inject_llms)

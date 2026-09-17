@@ -260,8 +260,23 @@ def build_study_graph(services: StudyServices | None = None,
                       conn: sqlite3.Connection | None = None,
                       max_results_override: int | None = None,
                       budget_override: dict[str, Any] | None = None,
-                      max_review_rounds: int | None = None):
+                      max_review_rounds: int | None = None,
+                      on_round: Any = None):
+    """构建研究图。
+
+    ``on_round(state)`` 会在审核轮次结束时被调用（P2-4：逐轮落库支持），
+    由调用方决定如何持久化；回调异常被吞掉，绝不影响图执行。
+    """
     services = services or StudyServices()
+
+    def _snapshot(state: StudyState) -> None:
+        if on_round is None:
+            return
+        try:
+            on_round(state)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("研究轮次落库失败: %s", exc)
+
     g = StateGraph(StudyState)
     rounds = max(1, int(max_review_rounds
                        or getattr(services.settings, "study_max_review_rounds", 3)))
@@ -284,6 +299,8 @@ def build_study_graph(services: StudyServices | None = None,
     )
     g.add_node("fact_checker", make_fact_check_node(
         services.fact_check_model, conn=conn, settings=services.settings))
+    # 轮次快照节点：只做副作用（逐轮落库），不改状态
+    g.add_node("round_snapshot", lambda state: (_snapshot(state), {})[1])
 
     g.add_edge(START, "planner")
     g.add_conditional_edges(
@@ -303,8 +320,9 @@ def build_study_graph(services: StudyServices | None = None,
         "content_builder", _route_after_content,
         {"collection": "collection", "reviewer": "reviewer"},
     )
+    g.add_edge("reviewer", "round_snapshot")
     g.add_conditional_edges(
-        "reviewer", _route_after_reviewer,
+        "round_snapshot", _route_after_reviewer,
         {
             "fact_check": "fact_checker",
             "content_builder": "content_builder",
@@ -333,11 +351,33 @@ def run_study(request: str,
               max_review_rounds: int | None = None) -> dict[str, Any]:
     # 默认生产路径必须绑定真实 LLM，不能静默使用确定性实现。
     services = services or StudyServices.from_env(require_llms=True)
-    app = build_study_graph(services, conn,
-                            max_results_override=max_results_override,
-                            budget_override=budget_override,
-                            max_review_rounds=max_review_rounds)
     run_id = uuid4().hex[:12]
+
+    def _persist_round(state: StudyState) -> None:
+        """审核轮次快照（P2-4）：逐轮落库，支持事后审计"每轮改了什么"。"""
+        round_index = int(state.get("review_rounds") or 0)
+        snapshot = dict(state)
+        snapshot["run_id"] = run_id
+        snapshot["request"] = request
+        if conn is not None:
+            save_study_run(conn, run_id, snapshot,
+                           round_index=round_index, request=request)
+            return
+        # 独立连接：图执行期间 conn 可能不属于本调用方
+        own_round_conn = connect(services.settings.db_path)
+        try:
+            save_study_run(own_round_conn, run_id, snapshot,
+                           round_index=round_index, request=request)
+        finally:
+            own_round_conn.close()
+
+    app = build_study_graph(
+        services, conn,
+        max_results_override=max_results_override,
+        budget_override=budget_override,
+        max_review_rounds=max_review_rounds,
+        on_round=_persist_round if persist else None)
+
     own = conn is None
     db = conn or connect(services.settings.db_path)
     try:

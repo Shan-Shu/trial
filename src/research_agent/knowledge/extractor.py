@@ -169,12 +169,20 @@ _REPORT_VERBS = re.compile(
     r"aim(s|ed)?|was found|were found|were developed|was investigated)\b",
     re.IGNORECASE,
 )
+# CJK 字符（用于按语种区分单字实体的合法性）
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def is_reporting_phrase(name: str | None) -> bool:
-    """判断实体名是否为“衔接语/证据句/报告性短语”（应被过滤）。"""
+    """判断实体名是否为“衔接语/证据句/报告性短语”（应被过滤）。
+
+    单字过滤按语种区分（P2-1）：中文单字术语（水/酶/铁/金/氮）是合法实体，
+    只有拉丁文的单字符才视为噪声。
+    """
     t = (name or "").strip()
-    if not t or len(t) < 2:
+    if not t:
+        return True
+    if len(t) < 2 and not _CJK_RE.search(t):
         return True
     low = t.lower()
     if any(low.startswith(p) for p in REPORTING_PHRASE_PREFIXES):

@@ -174,6 +174,8 @@ CREATE INDEX IF NOT EXISTS idx_hyperedges_type
     ON ontology_hyperedges(hyperedge_type);
 CREATE INDEX IF NOT EXISTS idx_hyperedges_paper
     ON ontology_hyperedges(paper_key);
+CREATE INDEX IF NOT EXISTS idx_hyperedges_created
+    ON ontology_hyperedges(created_at);
 
 CREATE TABLE IF NOT EXISTS ontology_hyperedge_members (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -363,9 +365,74 @@ def init_ontology(conn: sqlite3.Connection) -> None:
         _ensure_type_row(conn, key, "node", label, "seed")
     for key, label in seeded_relation_types():
         _ensure_type_row(conn, key, "relation", label, "seed")
+    # P2-7：SQLite 的 UNIQUE 把 NULL 视为互不相等，unit/subject_node 为空的
+    # 条件/测量会被反复插入。这里做一次性迁移（去重 + 建表达式唯一索引）。
+    _migrate_hyperedge_null_safe_uniqueness(conn)
     if meta_get(conn, "ontology_schema_version") is None:
         meta_set(conn, "ontology_schema_version", 1)
     conn.commit()
+
+
+def _index_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+def _migrate_hyperedge_null_safe_uniqueness(conn: sqlite3.Connection) -> dict[str, int]:
+    """给超边条件/测量补上"NULL 也参与比较"的唯一性（P2-7）。
+
+    SQLite 的 UNIQUE(hyperedge_id, condition_key, value_text, unit) 在 unit 为
+    NULL 时形同失效（NULL != NULL），同一条件会重复落库。这里：
+      1) 按 ifnull 归一后的键删除历史重复行（保留最小 id）；
+      2) 建立表达式唯一索引，使 INSERT OR IGNORE 对 NULL 也生效。
+    索引已存在时直接跳过，因此不是每次 init 都扫表。
+    """
+    stats = {"dropped_conditions": 0, "dropped_measurements": 0,
+             "indexes_created": 0}
+    if _index_exists(conn, "uq_hyperedge_conditions_nullsafe"):
+        return stats
+    cur = conn.execute(
+        """
+        DELETE FROM ontology_hyperedge_conditions
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM ontology_hyperedge_conditions
+            GROUP BY hyperedge_id, ifnull(condition_key, ''),
+                     ifnull(value_text, ''), ifnull(unit, '')
+        )
+        """
+    )
+    stats["dropped_conditions"] = max(0, int(cur.rowcount or 0))
+    cur = conn.execute(
+        """
+        DELETE FROM ontology_hyperedge_measurements
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM ontology_hyperedge_measurements
+            GROUP BY hyperedge_id, ifnull(metric, ''), ifnull(value_text, ''),
+                     ifnull(unit, ''), ifnull(subject_node, -1)
+        )
+        """
+    )
+    stats["dropped_measurements"] = max(0, int(cur.rowcount or 0))
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_hyperedge_conditions_nullsafe
+        ON ontology_hyperedge_conditions(
+            hyperedge_id, ifnull(condition_key, ''), ifnull(value_text, ''),
+            ifnull(unit, ''))
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_hyperedge_measurements_nullsafe
+        ON ontology_hyperedge_measurements(
+            hyperedge_id, ifnull(metric, ''), ifnull(value_text, ''),
+            ifnull(unit, ''), ifnull(subject_node, -1))
+        """
+    )
+    stats["indexes_created"] = 2
+    return stats
 
 
 def _ensure_type_row(conn: sqlite3.Connection, type_key: str, kind: str,
@@ -1006,56 +1073,18 @@ def list_hyperedges(conn: sqlite3.Connection, *, limit: int = 500,
     sql += " ORDER BY confidence DESC, hyperedge_id DESC LIMIT ?"
     params.append(max(1, int(limit)))
     rows = conn.execute(sql, params).fetchall()
+    # P2-7：原先每个超边 4 次子表查询（N+1）。改为一次批量加载（固定 5 次查询），
+    # 顺序与 confidence DESC 保持一致；node_ids 过滤语义与原先相同（先 LIMIT 后过滤）。
+    loaded = {int(d["hyperedge_id"]): d
+              for d in load_hyperedges(conn, [int(r["hyperedge_id"]) for r in rows])}
     out = []
     for r in rows:
-        members = [
-            dict(m) for m in conn.execute(
-                "SELECT m.node_id, m.role, m.position, m.qualifiers, "
-                "n.name, n.node_type, n.attributes "
-                "FROM ontology_hyperedge_members m "
-                "JOIN ontology_nodes n ON n.node_id=m.node_id "
-                "WHERE m.hyperedge_id=? ORDER BY m.position, m.id",
-                (r["hyperedge_id"],),
-            ).fetchall()
-        ]
-        if node_ids is not None and not any(
-                int(m["node_id"]) in node_ids for m in members):
+        d = loaded.get(int(r["hyperedge_id"]))
+        if d is None:
             continue
-        for m in members:
-            for key in ("qualifiers", "attributes"):
-                try:
-                    m[key] = json.loads(m.get(key) or "{}")
-                except json.JSONDecodeError:
-                    m[key] = {}
-        conditions = [
-            dict(x) for x in conn.execute(
-                "SELECT condition_key, operator, value_text, value_num, unit, qualifier "
-                "FROM ontology_hyperedge_conditions WHERE hyperedge_id=? "
-                "ORDER BY id", (r["hyperedge_id"],),
-            ).fetchall()
-        ]
-        measurements = [
-            dict(x) for x in conn.execute(
-                "SELECT metric, value_text, value_num, unit, qualifier, subject_node "
-                "FROM ontology_hyperedge_measurements WHERE hyperedge_id=? "
-                "ORDER BY id", (r["hyperedge_id"],),
-            ).fetchall()
-        ]
-        evidence = [
-            dict(x) for x in conn.execute(
-                "SELECT paper_key, section, span_text, char_start, char_end "
-                "FROM ontology_hyperedge_evidence WHERE hyperedge_id=? "
-                "ORDER BY id", (r["hyperedge_id"],),
-            ).fetchall()
-        ]
-        d = dict(r)
-        for key in ("attributes", "provenance"):
-            try:
-                d[key] = json.loads(d.get(key) or ("[]" if key == "provenance" else "{}"))
-            except json.JSONDecodeError:
-                d[key] = [] if key == "provenance" else {}
-        d.update({"members": members, "conditions": conditions,
-                  "measurements": measurements, "evidence": evidence})
+        if node_ids is not None and not any(
+                int(m["node_id"]) in node_ids for m in d.get("members", [])):
+            continue
         out.append(d)
     return out
 
