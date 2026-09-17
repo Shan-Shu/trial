@@ -402,6 +402,7 @@ def make_knowledge_node(model=None,
                                       "new_edges": 0, "new_hyperedges": 0,
                                       "new_types": [],
                                       "dropped_garbage": 0,
+                                      "failed_chunks": 0, "errors": [],
                                       "refine_runs": 0, "refine_issues": 0,
                                       "refine_attempts": 0, "refine_failed": 0}
             meta = {
@@ -438,8 +439,17 @@ def make_knowledge_node(model=None,
                 data, refine_stats = extractor.extract_with_refine(
                     chunk, meta, existing_entities, generic_warning,
                     state.get("domain_profile"))
+                # 块级抽取失败（LLM 报错/JSON 截断/超时）此前被记为"0 实体但成功"，
+                # 现在显式计数并记录首个错误（P1-9）
+                chunk_error = (data or {}).get("error")
+                if chunk_error:
+                    totals["failed_chunks"] += 1
+                    totals.setdefault("errors", [])
+                    if len(totals["errors"]) < 5:
+                        totals["errors"].append(str(chunk_error))
                 chunk_stats = _upsert_knowledge(
-                    db, data, quality_q=quality_q, flagged=flagged,
+                    db, data if isinstance(data, dict) else {},
+                    quality_q=quality_q, flagged=flagged,
                     paper_key=key, settings=settings, evidence_tier=tier,
                 )
                 for k in ("entities", "relations", "events", "hyperedges",
@@ -468,6 +478,17 @@ def make_knowledge_node(model=None,
                       if control_stats.get("triggered") else None,
                       "ontology_views": view_stats,
                       "local_label_cleanup": cleanup_stats}
+            failed_chunks = int(totals.get("failed_chunks") or 0)
+            if failed_chunks and not any(
+                    totals.get(k) for k in ("entities", "relations",
+                                            "events", "hyperedges")):
+                # 全部块都失败 → 明确标记失败，不与"这篇确实没抽到东西"混淆
+                report["failed_chunks"] = failed_chunks
+                log_event(db, "knowledge", "extract-failed", key, report)
+                return {"extraction_report": report, "status": "extract_failed",
+                        "error": (totals.get("errors") or ["抽取失败"])[0]}
+            if failed_chunks:
+                report["failed_chunks"] = failed_chunks
             log_event(db, "knowledge", "extracted", key, report)
             # 注意：不覆盖顶层 decision（knowledge/flagged 由质量节点给出）
             return {"extraction_report": report, "status": "extracted"}

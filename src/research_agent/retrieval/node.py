@@ -63,9 +63,19 @@ def _process_records(
             pdf = api.download_pdf(rec)
             clean = None
             fulltext_source = None
+            pdf_parse_error = None
             if pdf:
-                clean = clean_pdf(pdf)
-                fulltext_source = "pdf"
+                try:
+                    clean = clean_pdf(pdf)
+                    fulltext_source = "pdf"
+                except Exception as exc:  # noqa: BLE001
+                    # PDF 解析失败（付费墙 HTML 被当 PDF 下载 / 文件损坏）时
+                    # 不能丢掉整条记录：清空 clean_text 后继续走 XML→摘要回退（P1-7）
+                    pdf_parse_error = f"{type(exc).__name__}: {exc}"
+                    logger.warning("PDF 解析失败，降级为 XML/摘要: %s %s", key, exc)
+                    log_event(conn, "retrieval", "pdf-parse-error", key,
+                              {"error": pdf_parse_error})
+                    clean = None
             rec["pdf_blob"] = pdf
             rec["pdf_size"] = len(pdf) if pdf else None
             rec["pdf_sha256"] = _sha256(pdf) if pdf else None
@@ -76,7 +86,11 @@ def _process_records(
             # 任意源：有 PMCID 时回退 Europe PMC OA XML，再回退摘要
             if not rec.get("clean_text"):
                 if rec.get("pmcid") and callable(getattr(api, "fulltext_text", None)):
-                    ft = api.fulltext_text(rec["pmcid"])
+                    try:
+                        ft = api.fulltext_text(rec["pmcid"])
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("全文回退失败 %s: %s", key, exc)
+                        ft = None
                     if ft:
                         rec["clean_text"] = ft
                         fulltext_source = "xml"
@@ -93,6 +107,7 @@ def _process_records(
                       {"title": rec.get("title"), "pdf_bytes": rec["pdf_size"],
                        "clean_chars": len(rec["clean_text"] or ""),
                        "fulltext_source": fulltext_source,
+                       "pdf_parse_error": pdf_parse_error,
                        "removed_blocks": (clean or {}).get("removed_total", 0)})
             ingested.append(key)
         except Exception as exc:  # noqa: BLE001

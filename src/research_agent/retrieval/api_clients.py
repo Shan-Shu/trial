@@ -47,7 +47,9 @@ def download_pdf(url: str, timeout: int | None = None) -> bytes | None:
         resp.raise_for_status()
         ctype = resp.headers.get("Content-Type", "")
         if "pdf" not in ctype and not resp.url.lower().endswith(".pdf"):
-            logger.warning("疑似非 PDF 响应: %s (%s)", resp.url, ctype)
+            # 付费墙 HTML 等非 PDF 响应不再当作 PDF 返回（会导致解析失败并丢记录）
+            logger.warning("疑似非 PDF 响应，跳过: %s (%s)", resp.url, ctype)
+            return None
         return resp.content
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF 下载失败 %s: %s", url, exc)
@@ -399,27 +401,47 @@ class ApiHub:
         self.source = source
 
     def search(self, query: str, max_results: int = 5,
-               source: str | None = None) -> list[dict]:
-        """按 source 检索并补全元数据，返回规范记录列表。跨源按 key/DOI 去重。"""
+               source: str | None = None,
+               report: dict[str, Any] | None = None) -> list[dict]:
+        """按 source 检索并补全元数据，返回规范记录列表。跨源按 key/DOI 去重。
+
+        每个来源单独 try/except（P1-8）：单个源限流/报错不应中断整轮检索，
+        失败原因写入 ``report["source_errors"]``，供调用方区分"无命中"与"失败"。
+        """
         source = (source or self.source).lower()
         source_set = SOURCE_SETS.get(source)
         if source_set is None:
             source_set = SOURCE_SETS["fulltext"]
         raw: list[dict] = []
+        errors: dict[str, str] = {}
+        per_source: dict[str, int] = {}
         for name in source_set:
-            if name == "pubmed":
-                raw += self.pubmed.search(query, max_results=max_results)
-            elif name == "arxiv":
-                raw += self.arxiv.search(query, max_results=max_results)
-            elif name == "europepmc":
-                raw += self.europepmc.search(query, max_results=max_results)
-            elif name == "semantic_scholar":
-                raw += self.semantic_scholar.search(query, max_results=max_results)
-            elif name == "openalex":
-                raw += self.openalex.search_publications(
-                    query, per_page=max_results, open_access_only=True)
-            elif name == "ncpssd":
-                raw += self.ncpssd.search(query, max_results=max_results)
+            try:
+                if name == "pubmed":
+                    hits = self.pubmed.search(query, max_results=max_results)
+                elif name == "arxiv":
+                    hits = self.arxiv.search(query, max_results=max_results)
+                elif name == "europepmc":
+                    hits = self.europepmc.search(query, max_results=max_results)
+                elif name == "semantic_scholar":
+                    hits = self.semantic_scholar.search(query,
+                                                        max_results=max_results)
+                elif name == "openalex":
+                    hits = self.openalex.search_publications(
+                        query, per_page=max_results, open_access_only=True)
+                elif name == "ncpssd":
+                    hits = self.ncpssd.search(query, max_results=max_results)
+                else:
+                    hits = []
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("来源 %s 检索失败: %s", name, exc)
+                errors[name] = f"{type(exc).__name__}: {exc}"
+                hits = []
+            per_source[name] = len(hits or [])
+            raw += hits or []
+        if report is not None:
+            report["source_errors"] = errors
+            report["source_hits"] = per_source
         uniq: list[dict] = []
         seen_keys: set[str] = set()
         seen_dois: set[str] = set()

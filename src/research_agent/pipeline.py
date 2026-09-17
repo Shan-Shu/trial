@@ -113,7 +113,10 @@ def process_papers(keys: list[str], services: Services | None = None,
                    conn: sqlite3.Connection | None = None,
                    max_meta_attempts: int | None = None,
                    domain_profile: dict | None = None) -> list[dict]:
-    """对多篇文献逐篇运行 质量→知识 全流程（供主题批量与监控回调使用）。"""
+    """对多篇文献逐篇运行 质量→知识 全流程（供主题批量与监控回调使用）。
+
+    单篇失败不影响批次其余部分（P1-9）：异常被包装成该篇的失败结果。
+    """
     services = services or Services()
     graph = build_pipeline_graph(services, conn)
     results = []
@@ -122,7 +125,11 @@ def process_papers(keys: list[str], services: Services | None = None,
                                 "meta_attempts": 0}
         if domain_profile:
             state["domain_profile"] = domain_profile
-        out = graph.invoke(state)
+        try:
+            out = graph.invoke(state)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("处理文献失败 %s", key)
+            out = {"current_key": key, "status": "error", "error": str(exc)}
         results.append(out)
     return results
 
