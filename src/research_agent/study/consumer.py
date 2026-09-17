@@ -873,15 +873,21 @@ def _opportunity_gaps(items: list[dict[str, Any]],
         (plan.get("design_contract") or {}).get("objective")),
         clean_str(plan.get("goal"), ""))
     corpus_text = " ".join([objective, *hard]).lower()
+    # 目标是否要求多氮骨架：从硬约束/目标里判断（领域无关的关键词表来自词表包）
+    nitrogen_hints = tuple(_lex().get("heteroatom_hints") or
+                           ("氮", "氮原子", "nitrogen", "aza", "diaza", "polyaza"))
+    wants_multi_nitrogen = any(h in corpus_text for h in nitrogen_hints)
     out: list[dict[str, Any]] = []
     for state in states:
         refs = list(state.get("evidence_ids") or [])
         if not refs:
             continue
         missing = ""
-        if "氮原子" in corpus_text or "nitrogen" in corpus_text:
-            if not any("N" == x or x.startswith("N") for x in []):
-                missing = "目标要求多氮骨架，但已抽取机制均只涉及单个氮引入步骤"
+        # 只有"目标要求多氮"且"已抽取机制确实只涉及单氮引入"时才报该缺口。
+        # 旧实现是 `any(... for x in [])`（对空列表求 any 恒 False，取反恒 True），
+        # 会把这条缺口无条件加到每个机制状态上（P1-4）。
+        if wants_multi_nitrogen and not _mentions_multi_nitrogen(state):
+            missing = "目标要求多氮骨架，但已抽取机制均只涉及单个氮引入步骤"
         if state.get("intermediate") and not state.get("termination"):
             missing = missing or "缺少终止步骤与副反应信息，难以判断该中间体能否被定向捕获"
         out.append({
@@ -978,6 +984,23 @@ def _operator_candidates(states: list[dict[str, Any]],
             "hyperedge_ids": list(primitive.get("hyperedge_ids") or [])[:4],
         })
     return out
+
+
+def _mentions_multi_nitrogen(state: dict[str, Any]) -> bool:
+    """判断某个机制状态是否已经描述了"多氮/第二氮"的引入。
+
+    依据机制状态自身的文本（标签、中间体、键变化、侧反应），而不是空列表。
+    """
+    blob = " ".join([
+        clean_str(state.get("label"), ""),
+        clean_str(state.get("intermediate"), ""),
+        clean_str(state.get("start_state"), ""),
+        " ".join(str(x) for x in state.get("bond_changes") or []),
+    ]).lower()
+    hints = ("n-n", "diaza", "diazo", "diazine", "pyrimidine", "pyrazine",
+             "pyridazine", "triazine", "bis-nitrogen", "second nitrogen",
+             "两个氮", "双氮", "二氮", "多氮", "另一个氮", "第二氮", "氮插入")
+    return any(h in blob for h in hints)
 
 
 def _constraint_conflicts(states: list[dict[str, Any]],

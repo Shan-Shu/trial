@@ -17,10 +17,15 @@ from pathlib import Path
 
 from research_agent.config import Settings
 from research_agent.db import connect, get_paper, upsert_paper
-from research_agent.domains import DOMAIN_PROFILES
+from research_agent.domains import normalize_domain_profile
 from research_agent.knowledge.node import make_knowledge_node
 from research_agent.models import build_role_model
 from research_agent.ontology.store import init_ontology
+
+
+def domain_profile(kind: str) -> dict:
+    """从 packs 取领域画像（DOMAIN_PROFILES 已在 v0.4.2 外置）。"""
+    return normalize_domain_profile({"domain_kind": kind}, kind, kind)
 
 
 def _copy_corpus(src: Path, dst: Path) -> int:
@@ -75,7 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     n = _copy_corpus(src, dst)
     print(f"语料复制完成: {n} 篇 -> {dst}", flush=True)
 
-    profile = DOMAIN_PROFILES["chemistry"].copy()
+    # 领域画像来自 packs（v0.4.2 起 DOMAIN_PROFILES 已外置）
+    profile = domain_profile("chemistry").copy()
     profile["schema_status"] = "candidate"
     conns = []
     for _ in range(args.workers):

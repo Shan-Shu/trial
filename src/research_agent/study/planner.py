@@ -534,6 +534,7 @@ def make_planner_node(model=None,
                         {"request": request[:500]})
         plan = None
         model_error = None
+        parsed_ok = False
         if model is not None:
             prompt = PLANNER_PROMPT.replace(
                 "{today}", date.today().isoformat()
@@ -542,11 +543,19 @@ def make_planner_node(model=None,
                 msg = model.invoke([HumanMessage(content=prompt)])
                 raw = getattr(msg, "content", str(msg))
                 parsed = parse_json_object(raw)
+                if not isinstance(parsed, dict) or not parsed:
+                    raise ValueError(
+                        "Planner 输出无法解析为 JSON 对象（原文前 120 字："
+                        f"{clean_str(raw, '')[:120]}）")
                 plan = normalize_plan(parsed, request)
+                parsed_ok = True
             except Exception as exc:  # noqa: BLE001
                 logger.warning("规划节点 LLM 调用失败: %s", exc)
                 model_error = str(exc)
-        if plan is None and model is not None:
+        # 有模型但输出不可解析 → 明确失败，不静默降级（P1-3）：
+        # 否则 status=planned + planner_mode="llm" 会把确定性兜底伪装成模型结果，
+        # planning_failed 分支永远不可达，掩盖模型故障。
+        if model is not None and not parsed_ok:
             log_study_event(conn, settings, "planner", run_id, "failed",
                             {"error": model_error or "empty planner output"})
             return {
@@ -559,6 +568,8 @@ def make_planner_node(model=None,
             plan["planner_mode"] = "offline_fallback"
         else:
             plan["planner_mode"] = "llm"
+        if model_error:
+            plan["planner_model_error"] = model_error
         if max_results_override is not None:
             plan["mission"]["max_results"] = max(1, int(max_results_override))
             plan.setdefault("retrieval_plan", {})[

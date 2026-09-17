@@ -89,14 +89,21 @@ def clean_text(value: Any) -> str:
 # ------------------------------------------------------------------ 引用映射
 
 def build_citation_index(knowledge: dict[str, Any]) -> dict[str, str]:
-    """建立 库内编号 → paper_key 的映射（模式卡、证据卡、超边证据句）。"""
+    """建立 库内编号 → paper_key 的映射（模式卡、证据卡、超边与超边证据句）。
+
+    超边有两种编号：``H-0007``（超边级，取该超边第一篇论文）与
+    ``H-0007-1``、``H-0007-2``…（证据句级，**各自归属自己的论文**）。
+
+    旧实现用 ``setdefault`` 先写 ``H-0007`` 再循环写证据句，导致 base 被占用后
+    setdefault 不再更新，同一超边的所有证据句都被算到第一篇论文上（P1-5）。
+    这里改为两趟显式赋值：先证据句（精确归属），再超边级（兜底）。
+    """
     index: dict[str, str] = {}
     for pattern in knowledge.get("patterns") or []:
         pid = str(pattern.get("pattern_id") or "")
         keys = [str(k) for k in pattern.get("paper_keys") or [] if k]
         if pid and keys:
             index[pid] = keys[0]
-            # 该模式下的证据编号同样指向同一篇（多篇支持时取首篇）
             for eid in pattern.get("evidence_ids") or []:
                 index.setdefault(str(eid), keys[0])
     for ev in knowledge.get("evidence") or []:
@@ -104,18 +111,34 @@ def build_citation_index(knowledge: dict[str, Any]) -> dict[str, str]:
         key = str(ev.get("paper_key") or "")
         if eid and key:
             index.setdefault(eid, key)
+    # 第一趟：证据句级编号 → 各自的论文（精确）
     for hyper in knowledge.get("hyperedges") or []:
         hid = hyper.get("hyperedge_id")
         if hid is None:
             continue
         base = f"H-{int(hid):04d}"
-        for ev in hyper.get("evidence") or []:
+        for i, ev in enumerate(hyper.get("evidence") or []):
             key = str(ev.get("paper_key") or "")
-            if not key:
+            if key:
+                index[f"{base}-{i + 1}"] = key
+                index.setdefault(base, key)
+    # 第二趟：超边自带 evidence_ids（消费节点生成）也按顺序归属
+    for hyper in knowledge.get("hyperedges") or []:
+        hid = hyper.get("hyperedge_id")
+        if hid is None:
+            continue
+        base = f"H-{int(hid):04d}"
+        evidence = hyper.get("evidence") or []
+        for i, eid in enumerate(hyper.get("evidence_ids") or []):
+            eid = str(eid)
+            if not eid or eid in index:
                 continue
-            index.setdefault(base, key)
-            for i in range(len(hyper.get("evidence") or [])):
-                index.setdefault(f"{base}-{i + 1}", key)
+            if i < len(evidence):
+                key = str(evidence[i].get("paper_key") or "")
+                if key:
+                    index[eid] = key
+            elif base in index:
+                index[eid] = index[base]
     return index
 
 

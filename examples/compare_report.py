@@ -14,14 +14,17 @@ from collections import Counter, deque
 from pathlib import Path
 
 from research_agent.db import connect
-from research_agent.ontology.store import RELATION_SYNONYMS, SEED_RELATION_TYPES
+from research_agent.ontology.store import seeded_relation_types
+from research_agent.packs import relation_lexicon
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output" / "compare"
 OLD_DB = ROOT / "data" / "research_agent.db"
 NEW_DB = ROOT / "data" / "ontology_v02.db"
 
-CANONICAL_REL = {k for k, _ in SEED_RELATION_TYPES} | set(RELATION_SYNONYMS.values())
+# v0.4.2 起 SEED_RELATION_TYPES / RELATION_SYNONYMS 外置到 packs
+CANONICAL_REL = {k for k, _ in seeded_relation_types()} | set(
+    relation_lexicon()["synonyms"].values())
 CANONICAL_REL.add("involves")
 
 PALETTE = ["#4f8cff", "#2ecc8f", "#f5a623", "#ff5a6e", "#9b6bff", "#2dd4bf",
