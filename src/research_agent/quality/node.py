@@ -161,6 +161,8 @@ def make_human_review_node(conn: sqlite3.Connection | None = None,
             reason = (state.get("quality_result") or {}).get("rationale") or state.get("error")
             if rec:
                 rec["status"] = "human_review"
+                # 只更新状态：大字段（PDF/精校文本）交给 upsert_paper 的
+                # COALESCE 保留，避免把已入库正文清空（P0-2）
                 for field in ("pdf_blob", "pdf_sha256", "pdf_size", "clean_text",
                               "clean_text_sha256"):
                     rec.pop(field, None)

@@ -67,6 +67,13 @@ _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|°C|℃|ee|dr|equiv|mol|h|min)", 
 
 
 def _reference_sets(knowledge: dict[str, Any]) -> tuple[set[str], set[str]]:
+    """收集知识包内**所有**合法编号。
+
+    除模式卡（P-）与证据卡（E-/H-）外，还必须包含消费节点生成的
+    ``design_context`` 编号（``MS-xxxx`` / ``GAP-xxxx`` / ``OP-xxxx``）——
+    内容节点按提示词把机制证据写成 ``MS-``/``GAP-``，若不在白名单内
+    会被判为"伪造引用"，导致生成型任务几乎无法通过事实核查。
+    """
     patterns = {
         str(p.get("pattern_id") or "")
         for p in knowledge.get("patterns") or [] if p.get("pattern_id")
@@ -82,6 +89,16 @@ def _reference_sets(knowledge: dict[str, Any]) -> tuple[set[str], set[str]]:
         evidence.add(f"H-{hid:04d}")
         for i in range(len(h.get("evidence") or [])):
             evidence.add(f"H-{hid:04d}-{i + 1}")
+        # 超边自带的证据编号（消费节点已生成）
+        evidence.update(str(x) for x in h.get("evidence_ids") or [] if x)
+    design = knowledge.get("design_context") or {}
+    for key, id_key in (("mechanism_states", "state_id"),
+                        ("opportunity_gaps", "gap_id"),
+                        ("operator_candidates", "op_id"),
+                        ("reaction_primitives", "op_id")):
+        for item in design.get(key) or []:
+            if isinstance(item, dict) and clean_str(item.get(id_key)):
+                evidence.add(str(item[id_key]).strip())
     return patterns, evidence
 
 

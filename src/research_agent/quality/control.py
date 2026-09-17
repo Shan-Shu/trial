@@ -116,6 +116,41 @@ def _merge_edges(conn: sqlite3.Connection, drop_id: int, keep_id: int) -> int:
     return merged_count
 
 
+def _repoint_hyperedge_refs(conn: sqlite3.Connection,
+                            drop_id: int,
+                            keep_id: int) -> int:
+    """把超边成员与测量主体从被删节点重指到保留节点（P0-4）。
+
+    不重指的后果：产生悬空成员行（本库所有 ontology_* 表都没有 FOREIGN KEY），
+    随后知识节点的孤儿超边清理会因"成员全部失效"而删除整条超边，
+    连带它的 conditions / measurements / evidence —— 一次词典归并即造成数据丢失。
+    """
+    count = 0
+    # 成员表：同一超边里可能同时存在 keep 与 drop 成员，先删重复再加回
+    dup = conn.execute(
+        "SELECT m1.id FROM ontology_hyperedge_members m1 "
+        "JOIN ontology_hyperedge_members m2 "
+        "  ON m1.hyperedge_id = m2.hyperedge_id "
+        " WHERE m1.node_id=? AND m2.node_id=?",
+        (drop_id, keep_id),
+    ).fetchall()
+    if dup:
+        conn.executemany("DELETE FROM ontology_hyperedge_members WHERE id=?",
+                         [(int(r["id"]),) for r in dup])
+    cur = conn.execute(
+        "UPDATE ontology_hyperedge_members SET node_id=? WHERE node_id=?",
+        (keep_id, drop_id),
+    )
+    count += cur.rowcount or 0
+    cur = conn.execute(
+        "UPDATE ontology_hyperedge_measurements SET subject_node=? "
+        "WHERE subject_node=?",
+        (keep_id, drop_id),
+    )
+    count += cur.rowcount or 0
+    return count
+
+
 def _repoint_event_refs(conn: sqlite3.Connection,
                         drop_id: int,
                         keep_id: int) -> int:
@@ -183,6 +218,7 @@ def _merge_group(conn: sqlite3.Connection,
         )
         _merge_edges(conn, drop_id, keep_id)
         _repoint_event_refs(conn, drop_id, keep_id)
+        _repoint_hyperedge_refs(conn, drop_id, keep_id)
         ont.log_merge(
             conn, [drop_id], keep_id,
             rule_level="dictionary",

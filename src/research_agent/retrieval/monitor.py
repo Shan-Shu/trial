@@ -38,34 +38,95 @@ class PaperMonitor:
         return connect(self.db_path)
 
     def run_once(self, process_existing: bool = False) -> list[str]:
-        """返回自上次水位线以来新增的论文 key，并推进水位线。"""
+        """返回自上次水位线以来新增的论文 key，并推进水位线。
+
+        水位线推进规则（v0.4.3 修复 P0-3/P0-4）：
+        - 写入后**显式 commit**（此前 meta_set 后直接 close，写入被丢弃 →
+          水位线永远为空 → ``run_once`` 永远返回空列表）；
+        - 水位线取"本批记录的最大 created_at"，且用 ``>= + paper_key`` 兜底，
+          避免同一秒内入库的论文被永久跳过；
+        - 无新记录时**不推进**水位线。
+        """
         conn = self._conn()
         try:
             wm = meta_get(conn, self.watermark_key)
+            baseline = ""
             if wm is None:
                 if not process_existing:
                     # 首次启动：以当前最大时间作基线，避免重跑历史文献
-                    meta_set(conn, self.watermark_key, utcnow())
+                    latest = conn.execute(
+                        "SELECT MAX(created_at) AS m FROM papers").fetchone()["m"]
+                    meta_set(conn, self.watermark_key, latest or utcnow())
+                    conn.commit()
                     return []
-                wm = ""
+                meta_set(conn, self.watermark_key, "")
+                conn.commit()
+            else:
+                baseline = str(wm)
             rows = conn.execute(
-                "SELECT paper_key FROM papers WHERE created_at > ? "
-                "ORDER BY created_at ASC",
-                (wm,),
+                "SELECT paper_key, created_at FROM papers WHERE created_at >= ? "
+                "ORDER BY created_at ASC, paper_key ASC",
+                (baseline,),
             ).fetchall()
-            keys = [r["paper_key"] for r in rows]
+            acked = self._ack_set(conn)
+            keys: list[str] = []
+            for row in rows:
+                key = str(row["paper_key"])
+                if key in acked:
+                    continue
+                # 严格大于水位线，或"同一秒且未回执"→ 取出（避免同秒漏取）
+                keys.append(key)
             if keys:
-                meta_set(conn, self.watermark_key, utcnow())
+                # 回执本批 key，并把水位线推进到本批最大时间
+                meta_set(conn, self._ack_key, sorted(acked | set(keys)))
+                meta_set(conn, self.watermark_key,
+                         max(str(r["created_at"]) for r in rows))
+                conn.commit()
             return keys
+        finally:
+            conn.close()
+
+    # ---------------- 已处理集合（同一秒写入与失败重试的兜底） ----------------
+    @property
+    def _ack_key(self) -> str:
+        return f"{self.watermark_key}__acked"
+
+    def _ack_set(self, conn: sqlite3.Connection) -> set[str]:
+        value = meta_get(conn, self._ack_key, []) or []
+        return {str(x) for x in value if x} if isinstance(value, list) else set()
+
+    def ack(self, keys: Iterable[str]) -> None:
+        """处理成功后回执：无回执的 key 会在下次 ``run_once`` 被重新取出。"""
+        conn = self._conn()
+        try:
+            pending = self._ack_set(conn)
+            pending.update(str(k) for k in keys if k)
+            meta_set(conn, self._ack_key, sorted(pending))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def release(self, keys: Iterable[str]) -> None:
+        """处理失败：撤销回执，使这批 key 可以重试。"""
+        conn = self._conn()
+        try:
+            pending = self._ack_set(conn)
+            pending.difference_update(str(k) for k in keys if k)
+            meta_set(conn, self._ack_key, sorted(pending))
+            conn.commit()
         finally:
             conn.close()
 
     def run_forever(self, handler: Callable[[list[str]], None],
                     poll_interval: float = 60.0,
                     stop_event: threading.Event | None = None) -> None:
-        """轮询主循环：把新增论文批量交给 handler（可对接流水线/回调）。"""
+        """轮询主循环：把新增论文批量交给 handler（可对接流水线/回调）。
+
+        handler 抛错时**撤销回执**，这批 key 会在下一轮重试，不会被永久丢弃。
+        """
         logger.info("文献监控启动 poll_interval=%ss", poll_interval)
         while not (stop_event and stop_event.is_set()):
+            keys: list[str] = []
             try:
                 keys = self.run_once()
                 if keys:
@@ -73,6 +134,11 @@ class PaperMonitor:
                     handler(keys)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("监控轮询异常: %s", exc)
+                if keys:
+                    self.release(keys)
+            finally:
+                if keys:
+                    self.ack(keys)
             stop_event.wait(poll_interval) if stop_event else time.sleep(poll_interval)
 
     def start(self, handler: Callable[[list[str]], None],
