@@ -87,3 +87,16 @@ OK      # 90 → 101 → 115 → 121 → 132 → 140 → 153 → 169
 
 新增测试文件：`tests/test_issue_batch1.py`（11）、`tests/test_issue_batch2.py`（8）、
 `tests/test_issue_batch3.py`（6）、`tests/test_issue_batch4.py`（16）。
+
+## 五、实机验收（v0.3.1 生产库副本）
+
+P2-7 触及既有库结构，因此在一份 v0.3.1 生产库**副本**（`research_agent.db`，803 条超边/
+304 条条件/244 条测量）上跑真实迁移与查询：
+
+| 项目 | 结果 |
+|---|---|
+| 迁移去重 | 条件重复 0 条；测量重复 1 条被清理（NULL `subject_node` 的旧重复行） |
+| 索引 | 新增 `uq_hyperedge_conditions_nullsafe`、`uq_hyperedge_measurements_nullsafe`、`idx_hyperedges_created` |
+| `list_hyperedges(limit=50)` 实际 SELECT 次数 | **201 → 6**（N+1 消除，次数与条数无关） |
+
+脚本：`.dsh-tmp/check_migration.py`（临时验证脚本，未纳入版本库）。
