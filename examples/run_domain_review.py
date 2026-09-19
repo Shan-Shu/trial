@@ -26,7 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from research_agent.config import Settings                     # noqa: E402
 from research_agent.db import connect, get_paper               # noqa: E402
-from research_agent.models import build_role_model             # noqa: E402
+from research_agent.models import (                            # noqa: E402
+    build_chat_model,
+    build_role_model,
+)
 from research_agent.study.acs_format import to_acs_document    # noqa: E402
 from research_agent.study.graph import StudyServices, run_study  # noqa: E402
 
@@ -114,13 +117,20 @@ def collect_referenced_keys(knowledge: dict, draft: dict) -> list[str]:
 
 
 def run_variant(db: Path, domain: str, variant: str, out_dir: Path,
-                settings: Settings, persist: bool) -> dict:
+                settings: Settings, persist: bool,
+                fast_roles: bool = False) -> dict:
     request = REQUESTS[variant]
     print(f"\n===== 生成 {variant} 版综述 =====", flush=True)
     services = StudyServices(settings=settings)
     for role in ("planner", "consumer", "content", "review", "fact_check"):
         try:
-            model = build_role_model(role)
+            # 正文写作（content）用 .env 绑定的强模型；其余角色可选 flash 提速
+            if fast_roles and role != "content":
+                model = build_chat_model(provider="deepseek",
+                                         model_name="deepseek-v4-flash",
+                                         temperature=0.2)
+            else:
+                model = build_role_model(role)
         except Exception as exc:  # noqa: BLE001
             print(f"[warn] {role} 模型绑定失败：{exc}", flush=True)
             model = None
@@ -187,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
                     choices=["all", "zh", "zh_en", "en"])
     ap.add_argument("--no-persist", action="store_true",
                     help="不写 study_runs（默认写，便于审计）")
+    ap.add_argument("--fast-roles", action="store_true",
+                    help="Planner/Consumer/Reviewer/Fact-check 用 flash（正文仍用 .env 模型）")
     args = ap.parse_args(argv)
 
     db = Path(args.db)
@@ -199,7 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     for variant in variants:
         try:
             results.append(run_variant(db, args.domain, variant, out_dir,
-                                       settings, not args.no_persist))
+                                       settings, not args.no_persist,
+                                       fast_roles=args.fast_roles))
         except Exception as exc:  # noqa: BLE001
             logging.exception("生成 %s 版失败", variant)
             print(f"[error] {variant}: {exc}", flush=True)
