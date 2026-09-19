@@ -7,15 +7,18 @@
 
 ## 一、三个版本
 
-| 文件 | 版本 | 形态 | 正文 | 参考文献 |
+| 文件 | 版本 | 形态 | 摘要 | 参考文献 |
 |---|---|---|---|---|
-| [review_zh.md](review_zh.md) | 中文版 | 中文正文 + 编号上标引用 + 中文「参考文献」 | 3,112 字符（1,510 中文字） | 22 |
-| [review_zh_en.md](review_zh_en.md) | 中英版 | 中文正文 + 独立英文 `## Abstract` + 编号引用 | 4,684 字符（1,485 中文字） | 21 |
-| [review_en.md](review_en.md) | 英文 IEEE 版 | 英文正文 + IEEE 参考文献格式（`[n] A. Author, "Title," *Journal*, vol., no., pp., Year. doi:`） | 6,547 字符 | 18 |
+| [review_zh.md](review_zh.md) | 中文版 | 中文正文 + 编号上标引用 + 中文「参考文献」 | `## 摘要`（单段） | 22 |
+| [review_zh_en.md](review_zh_en.md) | 中英版 | 中文正文 + 独立英文 `## Abstract` + 编号引用 | `## Abstract`（单段） | 21 |
+| [review_en.md](review_en.md) | 英文 IEEE 版 | 英文正文 + IEEE 参考文献格式（`[n] A. Author, "Title," *Journal*, vol., no., pp., Year. doi:`） | `## Abstract`（单段） | 18 |
 
 自检（`--polish-only` 后）：三版 **`clean = true`** —— 无残留库内编号、无系统术语、无占位符；
-`dangling_citations = 0`、`duplicate_dois = 0`。逐条引用可经 `summary.json` / 原始 JSON 的
-`citation_map`（编号 → paper_key → DOI）回溯到库内文献。
+`dangling_citations = 0`、`duplicate_dois = 0`。**段落化**：`bullet_lines = 0`（正文没有
+要点罗列，全部为自然段），`paragraph_style = true`；**摘要**：`abstract_present = true`
+且为单段连贯文字（此前草稿的 `summary` 字段未被渲染、摘要缺失，已由 `ensure_abstract` 补上）。
+逐条引用可经 `summary.json` / `review_*.json` 的 `citation_map`（编号 → paper_key → DOI）
+回溯到库内文献。
 
 > 说明：三版的 Reviewer 判定均为 `manual_review`（而非 `pass`），原因是审核节点要求
 > "HQC 专属安全归约、HQC 参数集上的 ISD 复杂度、解码失败攻击对 HQC 的具体影响"等证据，

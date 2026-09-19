@@ -6,116 +6,85 @@
 
 ---
 
+## Abstract
+
+Abstract. This review synthesizes available evidence on HQC and code-based post-quantum cryptography. The database identifies HQC as a key encapsulation mechanism [相关文献] with HQC-128/192/256 parameter sets [相关文献]. Code-based security rests on the hardness of decoding linear codes and syndrome decoding [相关文献; 相关文献; 相关文献]. The review covers HQC implementation optimization [相关文献; 相关文献; 相关文献], single-trace simple power analysis of HQC multiplication [相关文献; 相关文献], general KEM security definitions [相关文献; 相关文献], and NIST PQC standardization [相关文献; 相关文献]. Several HQC-specific security reductions, ISD mappings, decoding-failure estimates, and migration statuses remain open questions.
+
 ## 1. Introduction
 
-- Post-quantum cryptography uses key encapsulation mechanisms to provide quantum-resistant key establishment <sup>1</sup>. HQC is identified in the knowledge base as a code-based KEM <sup>4</sup>, and a hybrid integrated encryption scheme employed ML-KEM-512 and HQC-128 as PQC KEMs <sup>2</sup>. Code-based cryptographic security is based on the difficulty of decoding random linear codes and the syndrome decoding problem <sup>3</sup>.<sup>1,2,3,4</sup>
-
-- The NIST PQC standardization project evaluates KEMs and digital signatures <sup>5,6</sup>. This review follows the provided evidence: supported claims are cited to exact internal IDs, while unsupported HQC-specific items are marked as open questions.<sup>5,6</sup>
+Post-quantum cryptography uses key encapsulation mechanisms to provide quantum-resistant key establishment <sup>1</sup>. HQC is identified in the knowledge base as a code-based KEM <sup>4</sup>, and a hybrid integrated encryption scheme employed ML-KEM-512 and HQC-128 as PQC KEMs <sup>2</sup>. Code-based cryptographic security is based on the difficulty of decoding random linear codes and the syndrome decoding problem <sup>3</sup>.<sup>1,2,3,4</sup>
+The NIST PQC standardization project evaluates KEMs and digital signatures <sup>5,6</sup>. This review follows the provided evidence: supported claims are cited to exact internal IDs, while unsupported HQC-specific items are marked as open questions.<sup>5,6</sup>
 
 ## 2. HQC Construction
 
-- HQC is a code-based key encapsulation mechanism in the NIST PQC corpus <sup>4</sup>. The generic KEM construction consists of key generation, encapsulation, and decapsulation algorithms <sup>7</sup>. The available mechanism cluster identifies HQC as a Hamming quasi-cyclic code KEM, and implementation-level evidence identifies HQC polynomial multiplication and a table-driven Reed-Solomon encoder/decoder as optimization targets <sup>8,9,4</sup>.<sup>4,7,8,9</sup>
-
-- The full construction details, namely concatenated Reed-Muller/Reed-Solomon codes, the HHK transform, implicit rejection, and an explicit reduction to quasi-cyclic syndrome decoding, are not directly exposed by 相关文献 or 相关文献. These elements are therefore identified as evidence gaps rather than confirmed findings <sup>9,4</sup>.<sup>4,9</sup>（该问题在现有语料中缺少直接证据）
+HQC is a code-based key encapsulation mechanism in the NIST PQC corpus <sup>4</sup>. The generic KEM construction consists of key generation, encapsulation, and decapsulation algorithms <sup>7</sup>. The available mechanism cluster identifies HQC as a Hamming quasi-cyclic code KEM, and implementation-level evidence identifies HQC polynomial multiplication and a table-driven Reed-Solomon encoder/decoder as optimization targets <sup>8,9,4</sup>.<sup>4,7,8,9</sup>
+The full construction details, namely concatenated Reed-Muller/Reed-Solomon codes, the HHK transform, implicit rejection, and an explicit reduction to quasi-cyclic syndrome decoding, are not directly exposed by 相关文献 or 相关文献. These elements are therefore identified as evidence gaps rather than confirmed findings <sup>9,4</sup>.<sup>4,9</sup>（该问题在现有语料中缺少直接证据）
 
 ## 3. Code Families and Parameter Sets
 
-- HQC supports HQC-128/192/256 parameter sets <sup>8</sup>. Optimized benchmark data covers HQC-1/HQC-3/HQC-5 implementations <sup>9</sup>.<sup>8,9</sup>
-
-- For HQC-128, evidence reports that GMD decoding and Reed-Solomon codeword length reduction from 46 to 36 reduce blocklength n from 17669 to 13829 and reduce key length by 22%, with decoding failure rate below 2^-128 <sup>10</sup>.<sup>10</sup>
-
-- Reed-Muller component parameters for HQC and decoding-failure rates for HQC-192/HQC-256 are not directly evidenced in this database <sup>8,10</sup>.<sup>8,10</sup>（该问题在现有语料中缺少直接证据）
+HQC supports HQC-128/192/256 parameter sets <sup>8</sup>. Optimized benchmark data covers HQC-1/HQC-3/HQC-5 implementations <sup>9</sup>.<sup>8,9</sup>
+For HQC-128, evidence reports that GMD decoding and Reed-Solomon codeword length reduction from 46 to 36 reduce blocklength n from 17669 to 13829 and reduce key length by 22%, with decoding failure rate below 2^-128 <sup>10</sup>.<sup>10</sup>
+Reed-Muller component parameters for HQC and decoding-failure rates for HQC-192/HQC-256 are not directly evidenced in this database <sup>8,10</sup>.<sup>8,10</sup>（该问题在现有语料中缺少直接证据）
 
 ## 4. Security Reductions and Hardness Assumptions
 
-- Code-based cryptography relies on the conjectured hardness of decoding linear codes; syndrome decoding is the basic hardness assumption <sup>3</sup>.<sup>3</sup>
-
-- Generic KEM security models include IND-CPA and IND-CCA, and the composition theorem connects pKEM and DEM security in hybrid encryption <sup>7,6</sup>.<sup>6,7</sup>
-
-- A security-reduction hyperedge exists for Stern's optimized signature scheme with salt and index, reducing t-HVZK to decoding random linear codes <sup>11</sup>. This is not an HQC-specific reduction.<sup>11</sup>
-
-- HQC-specific reduction to quasi-cyclic syndrome decoding and its tightness are not directly evidenced <sup>11,4</sup>.<sup>4,11</sup>（该问题在现有语料中缺少直接证据）
+Code-based cryptography relies on the conjectured hardness of decoding linear codes; syndrome decoding is the basic hardness assumption <sup>3</sup>.<sup>3</sup>
+Generic KEM security models include IND-CPA and IND-CCA, and the composition theorem connects pKEM and DEM security in hybrid encryption <sup>7,6</sup>.<sup>6,7</sup>
+A security-reduction hyperedge exists for Stern's optimized signature scheme with salt and index, reducing t-HVZK to decoding random linear codes <sup>11</sup>. This is not an HQC-specific reduction.<sup>11</sup>
+HQC-specific reduction to quasi-cyclic syndrome decoding and its tightness are not directly evidenced <sup>11,4</sup>.<sup>4,11</sup>（该问题在现有语料中缺少直接证据）
 
 ## 5. ISD-Family Cryptanalysis
 
-- The available evidence supports the random information-set concept in Prange-style information-set decoding and its workfactor concept, but not a specific combinatorial formula for HQC parameters <sup>12</sup>.<sup>12</sup>
-
-- For constant-rate learning parity with noise, ISD-type attacks are reported to have exponential complexity <sup>13</sup>.<sup>13</sup>
-
-- Mapping ISD-family attack complexities to HQC-128/192/256 parameter sets is an open evidence gap <sup>12,13,8</sup>.<sup>8,12,13</sup>（该问题在现有语料中缺少直接证据）
+The available evidence supports the random information-set concept in Prange-style information-set decoding and its workfactor concept, but not a specific combinatorial formula for HQC parameters <sup>12</sup>.<sup>12</sup>
+For constant-rate learning parity with noise, ISD-type attacks are reported to have exponential complexity <sup>13</sup>.<sup>13</sup>
+Mapping ISD-family attack complexities to HQC-128/192/256 parameter sets is an open evidence gap <sup>12,13,8</sup>.<sup>8,12,13</sup>（该问题在现有语料中缺少直接证据）
 
 ## 6. Decoding-Failure Cryptanalysis
 
-- HQC-128 parameter reduction with GMD decoding and reduced Reed-Solomon codeword length is reported to keep the decoding failure rate below 2^-128 <sup>10</sup>.<sup>10</sup>
-
-- HQC-192 and HQC-256 decoding-failure rates are not directly evidenced in the provided literature database <sup>8,10</sup>.<sup>8,10</sup>（该问题在现有语料中缺少直接证据）
+HQC-128 parameter reduction with GMD decoding and reduced Reed-Solomon codeword length is reported to keep the decoding failure rate below 2^-128 <sup>10</sup>.<sup>10</sup>
+HQC-192 and HQC-256 decoding-failure rates are not directly evidenced in the provided literature database <sup>8,10</sup>.<sup>8,10</sup>（该问题在现有语料中缺少直接证据）
 
 ## 7. Implementation Techniques and Side Channels
 
-- Optimized HQC implementation includes Sparse × Dense AVX2 multiplication, table-driven Reed-Solomon encoder/decoder, and AVX-parallel SHAKE <sup>9</sup>. Reported total runtime reduction is 50-60% for HQC-1/HQC-3/HQC-5 <sup>9</sup>.<sup>9</sup>
-
-- A single-trace simple power analysis attack on HQC multiplication is reported with 99.69% success in 10000 trials and recovers stored value a <sup>14</sup>. Direct evidence for full recovery of secret sparse vectors y and r2 is not provided.<sup>14</sup>
-
-- HVX-optimized HQC decoder evidence reports 1.85-2.07x latency speedup on a Snapdragon 8 Gen 2 platform <sup>15</sup>.<sup>15</sup>
-
-- No direct evidence on HQC side-channel countermeasures or protected implementations is available in the provided database <sup>14</sup>.<sup>14</sup>（该问题在现有语料中缺少直接证据）
+Optimized HQC implementation includes Sparse × Dense AVX2 multiplication, table-driven Reed-Solomon encoder/decoder, and AVX-parallel SHAKE <sup>9</sup>. Reported total runtime reduction is 50-60% for HQC-1/HQC-3/HQC-5 <sup>9</sup>.<sup>9</sup>
+A single-trace simple power analysis attack on HQC multiplication is reported with 99.69% success in 10000 trials and recovers stored value a <sup>14</sup>. Direct evidence for full recovery of secret sparse vectors y and r2 is not provided.<sup>14</sup>
+HVX-optimized HQC decoder evidence reports 1.85-2.07x latency speedup on a Snapdragon 8 Gen 2 platform <sup>15</sup>.<sup>15</sup>
+No direct evidence on HQC side-channel countermeasures or protected implementations is available in the provided database <sup>14</sup>.<sup>14</sup>（该问题在现有语料中缺少直接证据）
 
 ## 8. Standardization and Migration
 
-- The NIST PQC standardization process is evidenced with 2024 standards <sup>7,5</sup>. NIST-selected standards include ML-KEM in the available evidence <sup>8,16</sup>.<sup>5,7,8,16</sup>
-
-- McEliece is associated with the NIST PQC project <sup>17</sup>, and KYBER is evaluated and standardized as a KEM under NIST PQC <sup>16,18</sup>.<sup>16,17,18</sup>
-
-- A hybrid KEM-IES employed ML-KEM-512 and HQC-128 as PQC-based KEMs <sup>2</sup>, indicating a hybrid migration construction in the evidence.<sup>2</sup>
-
-- HQC is reported as one of the best KEM-category results in NIST evaluation evidence <sup>18</sup>. However, direct evidence of HQC final standardization and an HQC-specific migration path is not available <sup>18,8,4</sup>.<sup>4,8,18</sup>（该问题在现有语料中缺少直接证据）
+The NIST PQC standardization process is evidenced with 2024 standards <sup>7,5</sup>. NIST-selected standards include ML-KEM in the available evidence <sup>8,16</sup>.<sup>5,7,8,16</sup>
+McEliece is associated with the NIST PQC project <sup>17</sup>, and KYBER is evaluated and standardized as a KEM under NIST PQC <sup>16,18</sup>.<sup>16,17,18</sup>
+A hybrid KEM-IES employed ML-KEM-512 and HQC-128 as PQC-based KEMs <sup>2</sup>, indicating a hybrid migration construction in the evidence.<sup>2</sup>
+HQC is reported as one of the best KEM-category results in NIST evaluation evidence <sup>18</sup>. However, direct evidence of HQC final standardization and an HQC-specific migration path is not available <sup>18,8,4</sup>.<sup>4,8,18</sup>（该问题在现有语料中缺少直接证据）
 
 ## 9. Performance and Cost Comparison
 
-- OptHQC benchmarks report 50-60% total runtime reduction on HQC-1/HQC-3/HQC-5 compared with the HQC reference implementation <sup>9</sup>.<sup>9</sup>
-
-- Performance reduction for higher-security PQC is reported on ARM relative to x86 <sup>8</sup>.<sup>8</sup>
-
-- Unified same-platform comparison of HQC with other code-based KEM/PKE schemes is not available in the database; existing performance claims vary by platform and parameter set <sup>9,2</sup>.<sup>2,9</sup>（该问题在现有语料中缺少直接证据）
+OptHQC benchmarks report 50-60% total runtime reduction on HQC-1/HQC-3/HQC-5 compared with the HQC reference implementation <sup>9</sup>.<sup>9</sup>
+Performance reduction for higher-security PQC is reported on ARM relative to x86 <sup>8</sup>.<sup>8</sup>
+Unified same-platform comparison of HQC with other code-based KEM/PKE schemes is not available in the database; existing performance claims vary by platform and parameter set <sup>9,2</sup>.<sup>2,9</sup>（该问题在现有语料中缺少直接证据）
 
 ## 10. Open Problems
 
-- Open problems include HQC-specific security reductions and tightness <sup>7,11</sup>, ISD complexity mapping to HQC parameter sets <sup>12</sup>, HQC-192/256 decoding-failure rates <sup>10</sup>, practical HQC side-channel countermeasures <sup>14</sup>, HQC final standardization and migration <sup>8</sup>, and unified performance/cost comparison <sup>9</sup>.<sup>7,8,9,10,11,12,14</sup>（该问题在现有语料中缺少直接证据）
+Open problems include HQC-specific security reductions and tightness <sup>7,11</sup>, ISD complexity mapping to HQC parameter sets <sup>12</sup>, HQC-192/256 decoding-failure rates <sup>10</sup>, practical HQC side-channel countermeasures <sup>14</sup>, HQC final standardization and migration <sup>8</sup>, and unified performance/cost comparison <sup>9</sup>.<sup>7,8,9,10,11,12,14</sup>（该问题在现有语料中缺少直接证据）
 
 ## References
 
 [1] Ahmed, N., Gangopadhyay, A., Zhang, L, "NoisePQC++: A Unified NIST-Compliant PQC and Hybrid-PQC Implementation of the Noise Protocol," *arXiv*, 2026.
-
 [2] Chen, A. C. H, "Key Encapsulation Mechanism-Based Integrated Encryption Scheme (KEM-IES)," *arXiv*, 2026.
-
 [3] Bolkema, J., Gluesing-Luerssen, H., Kelley, C. A., Lauter, K., Malmskog, B., Rosenthal, J, "Variations of the McEliece Cryptosystem," *arXiv*, 2016. doi: 10.1007/978-3-319-63931-4_5.
-
 [4] Commey, D., Appiah, B., Klogo, G. S., Bagyl-Bac, W., Gadze, J. D., Alsenani, Y., et al, "Performance Analysis and Deployment Considerations of Post-Quantum Cryptography for Consumer Electronics," *arXiv*, 2025. doi: 10.1038/s41598-026-62968-4.
-
 [5] Park, J., Ju, J., Lee, W., Kang, B., Kachi, Y., Sakurai, K, "A Statistical Verification Method of Random Permutations for Hiding Countermeasure Against Side-Channel Attacks," *arXiv*, 2023. doi: 10.1016/j.jisa.2024.103797.
-
 [6] Panja, S., Sharifian, S., Jiang, S., Safavi-Naini, R, "CCA-Secure Hybrid Encryption in Correlated Randomness Model and KEM Combiners," *arXiv*, 2024. doi: 10.1016/j.tcs.2025.115518.
-
 [7] Battarbee, C., Striecks, C., Perret, L., Ramacher, S., Verhaeghe, K, "Quantum-Safe Hybrid Key Exchanges with KEM-Based Authentication," *arXiv*, 2024. doi: 10.1140/epjqt/s40507-025-00425-3.
-
 [8] Turino, C., Buchanan, W. J., Lo, O., Thuummler, C, "PQC-LEO: An Evaluation Framework for Post-Quantum Cryptographic Algorithms," *arXiv*, 2026. doi: 10.1109/TPS-ISA67132.2025.00033.
-
 [9] Dong, B., Feng, H., Wang, Q, "OptHQC: Optimize HQC for High-Performance Post-Quantum Cryptography," *arXiv*, 2025.
-
 [10] Cai, J., Zhang, X, "HQC Post-Quantum Cryptography Decryption with Generalized Minimum-Distance Reed-Solomon Decoder," *arXiv*, 2026.
-
 [11] Chailloux, A., Etinski, S, "On the (In)security of optimized Stern-like signature schemes," *arXiv*, 2024. doi: 10.1007/S10623-023-01329-Y.
-
 [12] Gassner, N., Lieb, J., Mazumder, A., Schaller, M, "Information-Set Decoding for Convolutional Codes," *arXiv*, 2024. doi: 10.1007/s10623-025-01649-1.
-
 [13] Lu, J. Z., Poremba, A., Quek, Y., Ramkumar, A, "Post-Quantum Cryptography from Quantum Stabilizer Decoding," *arXiv*, 2026.
-
 [14] Velek, P., Rabas, T., Buček, J, "Simple Power Analysis of Polynomial Multiplication in HQC," *arXiv*, 2026.
-
 [15] Chau, V. M., Kiet, N. N., Minh, P. Q., Ngoc, M. X., Anh, N. D., Ta, H, "Implementation and Optimization of HQC Decoding on NPU-Integrated Devices," *arXiv*, 2026. doi: 10.7467/ksae.2026.34.8.865.
-
 [16] Liang, Z., Fang, B., Zheng, J., Zhao, Y, "Compact and Efficient KEMs over NTRU Lattices," *arXiv*, 2022.
-
 [17] Gómez-Torrecillas, J., Lobillo, F. J., Navarro, G, "Skew differential Goppa codes and their application to McEliece cryptosystem," *arXiv*, 2022. doi: 10.1007/s10623-023-01286-6.
-
 [18] Khalimov, G., Kotukh, Y, "LINE: Public-key encryption," *arXiv*, 2025. doi: 10.1007/978-1-4612-1454-0_15.

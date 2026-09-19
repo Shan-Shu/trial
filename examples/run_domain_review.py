@@ -58,6 +58,91 @@ def polish_document(document: str) -> tuple[str, dict]:
                            or checks["system_terms"] or checks["placeholders"])
     return text, checks
 
+
+# 面向读者的综述里不该出现的"内部过程"小节（修订回应、候选池、自检等）
+INTERNAL_SECTIONS = {
+    "修订回应", "修订响应", "修订记录", "候选新方法", "候选方案", "自检",
+    "内部说明", "事实核查", "fact-check", "revision responses",
+    "candidate methods", "self-check",
+}
+# 摘要类小节：必须合成**一个**连贯段落，不能分条
+ABSTRACT_SECTIONS = {"摘要", "abstract", "概要", "中文摘要", "英文摘要"}
+_HEADING_RE = re.compile(r"^#{2,3}\s+(.*)$")
+_ITEM_RE = re.compile(r"^[-*]\s+(.*)$")
+
+
+def reformat_document(document: str) -> tuple[str, dict]:
+    """把"要点罗列"的草稿排版改成成段论述。
+
+    背景：内容节点输出的是 sections→items（每条是一个段落级文本），但此前的转换把
+    每条 item 渲染成 markdown 项目符号（``- ...``），于是整篇综述看起来是"要点清单"
+    而不是论文；摘要也成了分条。这里做纯文本级重排：
+
+    1. 丢弃内部过程小节（修订回应/候选方案/自检等）；
+    2. 每条 item 变成一个自然段（去掉项目符号）；
+    3. 摘要类小节把各条合并为**一个**段落；
+    4. 其余非 item 行（表格、引用行等）原样保留。
+    """
+    lines = document.splitlines()
+    head: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    current: tuple[str, list[str]] | None = None
+    for line in lines:
+        m = _HEADING_RE.match(line)
+        if m:
+            heading = m.group(1).strip()
+            if heading.startswith("#"):
+                heading = heading.lstrip("# ").strip()
+            current = (heading, [])
+            sections.append(current)
+            continue
+        if current is None:
+            head.append(line)
+        else:
+            current[1].append(line)
+
+    out = list(head)
+    stats = {"internal_sections_dropped": 0, "paragraphs": 0,
+             "bullets_removed": 0, "abstract_sections": 0}
+    for heading, body in sections:
+        low = heading.lower()
+        if low in INTERNAL_SECTIONS or heading in INTERNAL_SECTIONS:
+            stats["internal_sections_dropped"] += 1
+            continue
+        items: list[str] = []
+        others: list[str] = []
+        for line in body:
+            mi = _ITEM_RE.match(line)
+            if mi:
+                items.append(mi.group(1).strip())
+                stats["bullets_removed"] += 1
+            else:
+                others.append(line)
+        out.append("")
+        out.append(f"## {heading}")
+        out.append("")
+        if items and (low in ABSTRACT_SECTIONS or heading in ABSTRACT_SECTIONS):
+            merged = " ".join(t for t in items if t)
+            out.append(merged)
+            out.append("")
+            stats["paragraphs"] += 1
+            stats["abstract_sections"] += 1
+        else:
+            for text in items:
+                if text:
+                    out.append(text)
+                    out.append("")
+                    stats["paragraphs"] += 1
+        for line in others:
+            if line.strip():
+                out.append(line)
+        # 去掉小节末尾多余空行
+        while out and not out[-1].strip():
+            out.pop()
+    text = "\n".join(out).strip() + "\n"
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text, stats
+
 TOPIC = "HQC 与基于编码的后量子密码（code-based cryptography）"
 
 REQUESTS = {
@@ -197,8 +282,18 @@ def run_variant(db: Path, domain: str, variant: str, out_dir: Path,
         "stats": doc["stats"],
         "draft_json": draft,
     }
-    polished, polish_checks = polish_document(doc["markdown"])
+    with_abstract, abstract_inserted = ensure_abstract(doc["markdown"], draft,
+                                                       variant)
+    reformatted, fmt_stats = reformat_document(with_abstract)
+    polished, polish_checks = polish_document(reformatted)
+    polish_checks["bullet_lines"] = len(
+        [ln for ln in polished.splitlines() if _ITEM_RE.match(ln)])
+    polish_checks["paragraph_style"] = polish_checks["bullet_lines"] == 0
+    polish_checks["abstract_present"] = any(h in polished
+                                            for h in ABSTRACT_HEADINGS)
+    polish_checks["abstract_inserted"] = abstract_inserted
     payload["document"] = polished
+    payload["format_stats"] = fmt_stats
     payload["checks"].update(polish_checks)
     doc["markdown"] = polished
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -215,21 +310,55 @@ def run_variant(db: Path, domain: str, variant: str, out_dir: Path,
     return payload
 
 
+def ensure_abstract(document: str, draft: dict, variant: str) -> tuple[str, bool]:
+    """综述必须有摘要：草稿的 ``summary`` 此前没有被渲染进正文，这里补上。
+
+    已有 ``## 摘要`` / ``## Abstract`` 小节时不重复插入。
+    """
+    summary = (draft or {}).get("summary") or {}
+    text = " ".join(str(x) for x in
+                    ([summary.get("text")] + list(summary.get("items") or []))
+                    if x)
+    if not text.strip() or any(h in document for h in ABSTRACT_HEADINGS):
+        return document, False
+    heading = "## 摘要" if variant == "zh" else "## Abstract"
+    marker = document.find("\n## ")
+    block = f"{heading}\n\n{text.strip()}\n"
+    if marker == -1:
+        return document.rstrip() + "\n\n" + block, True
+    return document[:marker].rstrip() + "\n\n" + block + document[marker:], True
+
+
+ABSTRACT_HEADINGS = ("## 摘要", "## Abstract", "## 概要")
+
+
 def polish_only(out_dir: Path) -> int:
-    """只对已生成的综述文件做收尾清理（不重跑 LLM）。"""
+    """只对已生成的综述文件做收尾：补摘要 + 段落化重排 + 裸编号/系统术语清理（不重跑 LLM）。"""
     fixed = 0
     for json_path in sorted(out_dir.glob("review_*.json")):
         payload = json.loads(json_path.read_text(encoding="utf-8"))
-        document, checks = polish_document(payload.get("document") or "")
-        payload["document"] = document
+        text, inserted = ensure_abstract(payload.get("document") or "",
+                                         payload.get("draft_json") or {},
+                                         str(payload.get("variant") or ""))
+        text, fmt = reformat_document(text)
+        text, checks = polish_document(text)
+        bullet_lines = len([ln for ln in text.splitlines()
+                            if _ITEM_RE.match(ln)])
+        checks["bullet_lines"] = bullet_lines
+        checks["paragraph_style"] = bullet_lines == 0
+        checks["abstract_present"] = any(h in text for h in ABSTRACT_HEADINGS)
+        checks["abstract_inserted"] = inserted
+        payload["document"] = text
         payload.setdefault("checks", {}).update(checks)
+        payload["format_stats"] = fmt
         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                              encoding="utf-8")
-        md_path = json_path.with_suffix(".md")
-        md_path.write_text(document, encoding="utf-8")
-        print(f"[polish] {json_path.name}: clean={checks['clean']} "
-              f"residual={checks['residual_internal_ids']} "
-              f"system={checks['system_terms']}", flush=True)
+        json_path.with_suffix(".md").write_text(text, encoding="utf-8")
+        print(f"[polish] {json_path.name}: paragraphs={fmt['paragraphs']} "
+              f"bullets_removed={fmt['bullets_removed']} "
+              f"internal_dropped={fmt['internal_sections_dropped']} "
+              f"abstract={checks['abstract_present']} "
+              f"clean={checks['clean']} bullet_lines={bullet_lines}", flush=True)
         fixed += 1
     return fixed
 

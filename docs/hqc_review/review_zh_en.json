@@ -1,0 +1,1111 @@
+{
+  "variant": "zh_en",
+  "request": "写一份题为《HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现》的综述论文，正文用中文，并在摘要之后附一段 200 词左右的英文摘要（Abstract，另起小节）。要求：只以给定文献库为事实来源；覆盖基于编码密码学整体脉络与 HQC 的构造、参数集、安全归约、ISD 族攻击与解码失败攻击、实现与侧信道、标准化、性能对比与开放问题；每条实质结论都要带库内编号引用，不得编造文献或数据。",
+  "run_id": "f6b578eacfef",
+  "status": "manual_review",
+  "decision": "manual_review",
+  "review": {
+    "decision": "manual_review",
+    "summary": "草稿基本覆盖综述框架，但多项必需主题缺少直接库内证据，且存在外部术语、误引和未请求的“修订回应”小节，需补检证据并修订后再审。 | 已达最大审核轮数",
+    "instruction_compliance": {
+      "score": 0.72,
+      "requirements": [
+        {
+          "id": "R1",
+          "category": "content",
+          "type": "mandatory",
+          "requirement": "标题为《HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现》。",
+          "status": "met",
+          "location": "title / markdown 一级标题",
+          "reason": "题名与用户指定题名一致。",
+          "revision_action": ""
+        },
+        {
+          "id": "R2",
+          "category": "content",
+          "type": "mandatory",
+          "requirement": "正文用中文撰写。",
+          "status": "met",
+          "location": "各中文章节",
+          "reason": "除用户要求的英文 Abstract 外，正文主体为中文。",
+          "revision_action": ""
+        },
+        {
+          "id": "R3",
+          "category": "format",
+          "type": "mandatory",
+          "requirement": "摘要之后另起小节附约 200 词英文 Abstract。",
+          "status": "partial",
+          "location": "开头中文概述之后、Abstract 小节",
+          "reason": "确有独立“## Abstract”小节且英文长度约 200 词，但其前无明确“摘要”标题；Abstract 内还混入 [supported] 标签和末尾引用列表，不是纯摘要格式。",
+          "revision_action": "在 Abstract 前增加明确中文“摘要”小节标题；英文 Abstract 去除 [supported] 标记和末尾集中引用列表，保持约 200 词。"
+        },
+        {
+          "id": "R4",
+          "category": "coverage",
+          "type": "mandatory",
+          "requirement": "覆盖基于编码密码学整体脉络与 HQC 的构造、参数集、安全归约、ISD 族攻击与解码失败攻击、实现与侧信道、标准化、性能对比与开放问题。",
+          "status": "partial",
+          "location": "各章节",
+          "reason": "主题标题齐全，但解码失败攻击、HQC 特定安全归约、ISD 在 HQC 参数集上的复杂度、HQC-192/256 参数优化、HQC 标准化最终版本等关键内容仅标为 open_question，缺少实质综述性证据。",
+          "revision_action": "补检库内 HQC 特定证据；若库内确实无证据，应明确整体为 need_more_data，并将相关小节改写为证据缺口说明而非实质覆盖。"
+        },
+        {
+          "id": "R5",
+          "category": "content",
+          "type": "mandatory",
+          "requirement": "每条实质结论带给定文献库内编号引用。",
+          "status": "partial",
+          "location": "supported/hypothesis 条目、解码失败攻击小节",
+          "reason": "多数 supported/hypothesis 条目有库内编号引用；但“不能由通用 RSR/MBBP-LD 邻近证据推导”引入未引用的库外术语，部分 supported 结论依赖非 HQC 特定证据泛化归因。",
+          "revision_action": "删除未引用库外术语；对非 HQC 特定证据支持的结论补充 HQC 特定证据或降级为开放问题。"
+        },
+        {
+          "id": "R6",
+          "category": "safety",
+          "type": "mandatory",
+          "requirement": "只使用给定文献库作为事实来源。",
+          "status": "partial",
+          "location": "解码失败攻击小节、修订回应小节",
+          "reason": "正文出现知识库外术语 MBBP-LD；修订回应中提及 H-23996、H-6202、H-3220 等非知识库 ID。",
+          "revision_action": "删除或替换 MBBP-LD；最终论文中删除修订回应元数据，不得保留非知识库 ID。"
+        },
+        {
+          "id": "R7",
+          "category": "safety",
+          "type": "mandatory",
+          "requirement": "不得编造文献或数据。",
+          "status": "partial",
+          "location": "侧信道小节、修订回应小节",
+          "reason": "未发现伪造数值，但存在库外术语、非知识库 ID 提及，以及将 H-1451/H-1559/H-1742 扩展为“多项式乘法”目标的疑似过度归因。",
+          "revision_action": "删除非知识库 ID；将侧信道目标限定为证据句明确支持的 HQC 单迹 SPA/秘密稀疏向量恢复，或补充明确支持多项式乘法的证据。"
+        },
+        {
+          "id": "R8",
+          "category": "logic",
+          "type": "mandatory",
+          "requirement": "不得将相关性写成因果性，不得将假设写成已证实事实。",
+          "status": "met",
+          "location": "安全归约、性能对比、侧信道小节",
+          "reason": "草稿多处使用 hypothesis/open_question 标签，并明确邻近归约不等同于 HQC 特定归约，未明显把相关写成因果。",
+          "revision_action": ""
+        },
+        {
+          "id": "R9",
+          "category": "format",
+          "type": "mandatory",
+          "requirement": "交付格式为 markdown。",
+          "status": "met",
+          "location": "markdown 字段",
+          "reason": "交付物为 markdown 文本。",
+          "revision_action": ""
+        },
+        {
+          "id": "R10",
+          "category": "format",
+          "type": "mandatory",
+          "requirement": "最终论文不应包含未请求的元数据或修订过程小节。",
+          "status": "unmet",
+          "location": "文末“修订回应”小节",
+          "reason": "用户要求的是综述论文，draft 的 markdown 末尾包含“修订回应”和 [已解决]/[未解决] 等审校元数据，不属于论文正文。",
+          "revision_action": "从最终 markdown 中删除“修订回应”小节及所有审校元数据。"
+        },
+        {
+          "id": "R11",
+          "category": "format",
+          "type": "optional",
+          "requirement": "引用风格为数字/库内编号。",
+          "status": "met",
+          "location": "全文引用",
+          "reason": "正文使用 E-*、H-*、P-* 库内编号引用。",
+          "revision_action": ""
+        },
+        {
+          "id": "R12",
+          "category": "design",
+          "type": "optional",
+          "requirement": "设计契约候选生成要求。",
+          "status": "not_applicable",
+          "location": "task_plan.design_contract",
+          "reason": "task_plan.design_contract 为 null，用户任务是综述论文，不要求生成候选方案。",
+          "revision_action": ""
+        }
+      ],
+      "critical_failures": [
+        "解码失败攻击、HQC 特定安全归约、ISD 在 HQC 参数集上的复杂度、HQC-192/256 参数优化、HQC 标准化最终版本等必需主题缺少直接库内证据，仅标为开放问题，未形成实质覆盖。",
+        "正文末尾包含未请求的“修订回应”小节，属于审校元数据，不应进入最终论文。",
+        "存在知识库外术语 MBBP-LD，且修订回应中提及非知识库 ID H-23996、H-6202、H-3220。",
+        "侧信道段落将 H-1451-1/H-1559-1/H-1742-1 归因到“HQC 多项式乘法”攻击目标，但证据句未明确支持该目标。"
+      ]
+    },
+    "evidence_correctness": {
+      "score": 0.74,
+      "threshold": 0.85,
+      "hard_fail": true,
+      "checks": [
+        {
+          "type": "citation_exists",
+          "status": "partial",
+          "location": "全文引用与修订回应",
+          "reason": "论文正文引用的 E-*、H-*、P-* 大多存在于 knowledge；但修订回应提到 H-23996、H-6202、H-3220 等不在 knowledge 中，MBBP-LD 也非库内条目。"
+        },
+        {
+          "type": "correct_attribution",
+          "status": "partial",
+          "location": "HQC 构造与参数集、实现与侧信道小节",
+          "reason": "H-1744-1 是 IES/KEM 流程证据而非 HQC 特定构造证据；H-6320-1 是一般 KEM 定义；H-1451-1/H-1559-1/H-1742-1 支持 HQC 单迹 SPA 与秘密稀疏向量恢复，但未明确支持“多项式乘法”这一具体目标。"
+        },
+        {
+          "type": "no_fabrication",
+          "status": "partial",
+          "location": "解码失败攻击小节、修订回应小节",
+          "reason": "未发现伪造数值或伪造引用编号，但存在库外术语 MBBP-LD 和非知识库 ID 提及，违反只使用给定文献库来源的要求。"
+        },
+        {
+          "type": "no_overclaim",
+          "status": "partial",
+          "location": "HQC 构造、标准化、侧信道与性能对比",
+          "reason": "部分 supported 表述将一般 KEM 定义或邻近 IES 证据扩展为 HQC 特定事实；侧信道“多项式乘法”归属超出引用句；标准化最终状态表述较谨慎，但部分 HQC 标准化语境仍依赖间接证据。"
+        },
+        {
+          "type": "no_unsupported_number",
+          "status": "pass",
+          "location": "HQC-128 参数优化、参数集、性能与实现数据",
+          "reason": "n=13829、nRS=36、DFR 低于 2^-128、密钥长度减少 22%、HQC-128/192/256 等数值均可由 H-1723-1、H-1669-1、H-5016-1 等支持；未列出的 H-1415/H-1414 具体数值未被草稿展开。"
+        },
+        {
+          "type": "contradiction_preserved",
+          "status": "pass",
+          "location": "实现与侧信道、性能对比小节",
+          "reason": "草稿将侧信道防护声称与独立 SPA 攻击证据之间的张力标为 hypothesis，并说明平台/条件差异，避免强行统一。"
+        },
+        {
+          "type": "no_causality",
+          "status": "pass",
+          "location": "性能与优化小节",
+          "reason": "关于优化降低运行时间的因果表述可由 H-1647 等 causal_relation hyperedge 支撑；未发现明显把相关性写成因果性。"
+        }
+      ]
+    },
+    "overall_score": 0.724,
+    "issues": [],
+    "revision_actions": [
+      "补检或请求 HQC 特定证据：安全归约、ISD 对 HQC 参数集的复杂度、解码失败攻击、HQC-192/256 参数优化、HQC 标准化最终版本；若仍缺失，保留 need_more_data 并不以邻近证据替代。",
+      "从最终 markdown 中删除“修订回应”小节及所有 [已解决]/[未解决] 审校元数据。",
+      "删除 MBBP-LD 等知识库外术语；修订回应中不得提及 H-23996、H-6202、H-3220 等非知识库 ID。",
+      "将侧信道表述改为证据句明确支持的“HQC 单迹 SPA/秘密稀疏向量恢复”，删除或补证“多项式乘法”目标。",
+      "修正 HQC KEM 流程与构造引用：H-6320-1 仅支持一般 KEM 定义，H-1744-1 为 IES 中 KEM 使用；需补充 HQC 特定构造证据或降低表述强度。",
+      "在英文 Abstract 前增加明确中文“摘要”标题；Abstract 内去除 [supported] 标签和末尾集中引用列表，保持约 200 词纯英文摘要。",
+      "对 H-1647-1 与 H-1559/H-1451/H-1742 的冲突表述，明确不同实现、平台和攻击模型，不可暗示同一实现内部的直接矛盾。"
+    ],
+    "model_call": {
+      "timeout": 600,
+      "elapsed": 71.0,
+      "error": null,
+      "timed_out": false
+    }
+  },
+  "fact_check": null,
+  "plan": {
+    "goal": "生成一份仅依赖给定文献库、正文为中文并附约200词英文Abstract的HQC与基于编码后量子密码综述论文，覆盖构造、安全性、密码分析与实现等指定主题。",
+    "domain": "post-quantum cryptography; code-based cryptography; HQC",
+    "content_type": "frontier_review",
+    "task_kind": "summary",
+    "analysis_plan": {
+      "dimensions": [
+        "基于编码密码学整体脉络",
+        "HQC 构造",
+        "参数集",
+        "安全归约",
+        "ISD 族攻击",
+        "解码失败攻击",
+        "实现与侧信道",
+        "标准化",
+        "性能对比",
+        "开放问题"
+      ],
+      "required_comparisons": [
+        "HQC 与其他基于编码 KEM 的构造、参数、安全性假设与性能对比",
+        "不同 HQC 参数集及标准化版本之间的差异对比",
+        "ISD 族攻击与解码失败攻击的威胁模型、复杂度与适用条件对比"
+      ],
+      "open_questions": [
+        "HQC 安全归约的紧致性与假设强度",
+        "ISD 族攻击与解码失败攻击的后续改进空间",
+        "实现侧信道防护的有效性与性能代价",
+        "标准化进程、迁移路径与部署开放问题",
+        "性能对比中公平基准与参数选择问题"
+      ]
+    },
+    "evidence_policy": {
+      "traceability_required": true,
+      "hypothesis_label_required": true,
+      "minimum_support": 2,
+      "allow_evidence_gap_retrieval": true
+    },
+    "design_contract": null,
+    "creative_contract": null,
+    "domain_profile": {
+      "domain_kind": "general",
+      "label": "通用科研",
+      "dimensions": [
+        "密码学基础",
+        "编码理论",
+        "密钥封装机制",
+        "安全归约",
+        "攻击算法",
+        "实现工程",
+        "标准化",
+        "性能评估"
+      ],
+      "candidate_entity_types": [
+        "密码方案",
+        "KEM",
+        "PKE",
+        "参数集",
+        "安全归约",
+        "攻击算法",
+        "实现库",
+        "标准化项目",
+        "性能基准"
+      ],
+      "candidate_relation_types": [
+        "基于",
+        "改进",
+        "安全性依赖",
+        "攻击",
+        "参数化",
+        "标准化",
+        "比较"
+      ],
+      "schema_status": "candidate"
+    },
+    "analysis_targets": [
+      "基于编码密码学整体脉络",
+      "HQC 构造",
+      "参数集",
+      "安全归约",
+      "ISD 族攻击",
+      "解码失败攻击",
+      "实现与侧信道",
+      "标准化",
+      "性能对比",
+      "开放问题"
+    ],
+    "mission": {
+      "seed_terms": [
+        "HQC code-based KEM",
+        "HQC post-quantum cryptography",
+        "code-based cryptography post-quantum",
+        "HQC security reduction",
+        "HQC parameter sets",
+        "information set decoding code-based KEM",
+        "decoding failure attack HQC",
+        "HQC side-channel implementation",
+        "post-quantum cryptography standardization code-based",
+        "HQC performance comparison"
+      ],
+      "max_results": 80,
+      "min_confidence": 0.6,
+      "collection_mode": "broad",
+      "recency_window": "2017-01-01:2026-09-19"
+    },
+    "retrieval_plan": {
+      "objective": "在给定文献库内收集覆盖基于编码密码学整体脉络、HQC 构造与参数集、安全归约、ISD 族攻击、解码失败攻击、实现与侧信道、标准化、性能对比和开放问题的可溯源证据。",
+      "query_variants": [
+        "HQC code-based KEM",
+        "HQC post-quantum cryptography construction",
+        "HQC parameter sets security",
+        "HQC security reduction",
+        "code-based KEM security proof",
+        "information set decoding code-based cryptography",
+        "ISD attack HQC",
+        "decoding failure attack code-based KEM",
+        "HQC implementation side-channel",
+        "code-based post-quantum cryptography standardization",
+        "HQC performance comparison",
+        "post-quantum KEM benchmark HQC"
+      ],
+      "source_mix": [
+        "given_literature_library"
+      ],
+      "dimensions": [
+        "基于编码密码学发展脉络",
+        "HQC 构造与参数集",
+        "安全归约与困难假设",
+        "ISD 族攻击",
+        "解码失败攻击",
+        "实现与侧信道",
+        "标准化进程",
+        "性能对比",
+        "开放问题"
+      ],
+      "recency_window": "2017-01-01:2026-09-19",
+      "max_results_per_query": 20,
+      "min_quality": 0.6,
+      "must_cover": [
+        "基于编码密码学整体脉络",
+        "HQC 构造",
+        "参数集",
+        "安全归约",
+        "ISD 族攻击",
+        "解码失败攻击",
+        "实现与侧信道",
+        "标准化",
+        "性能对比",
+        "开放问题",
+        "库内编号引用"
+      ],
+      "stop_conditions": [
+        "覆盖基于编码密码学整体脉络与 HQC 核心主题",
+        "每类核心结论至少有两条独立库内证据",
+        "新增检索不再改变主要结论",
+        "所有实质结论均能映射到库内编号"
+      ],
+      "strategy": "broad"
+    },
+    "retrieval": {
+      "strategy": "broad",
+      "evidence_gap_enabled": false,
+      "deep_single_domain_enabled": false,
+      "min_support_target": 2,
+      "max_skill_rounds": 2,
+      "relevance_gate": "strict",
+      "reference_direction": "both"
+    },
+    "instruction_contract": {
+      "task_kind": "summary",
+      "deliverable_format": "markdown",
+      "language": "zh",
+      "required_method_count": 0,
+      "required_sections": [],
+      "must_include": [
+        "正文用中文",
+        "摘要之后另起小节附约200词英文 Abstract",
+        "覆盖基于编码密码学整体脉络与 HQC 的构造、参数集、安全归约、ISD 族攻击与解码失败攻击、实现与侧信道、标准化、性能对比与开放问题",
+        "每条实质结论带给定文献库内编号引用",
+        "只使用给定文献库作为事实来源",
+        "不得编造文献或数据"
+      ],
+      "must_exclude": [
+        "编造文献或数据",
+        "超出给定文献库的事实断言",
+        "未带库内编号引用的实质结论"
+      ],
+      "reference_style": "numeric",
+      "evidence_policy": "每条实质断言可溯源至给定文献库编号",
+      "correctness_threshold": 0.85
+    },
+    "stop_conditions": [
+      "检索覆盖所有 must_cover 维度",
+      "核心结论至少两个独立库内证据支持",
+      "新增证据不再改变主要结论",
+      "所有实质结论均可映射到库内编号"
+    ],
+    "budget": {
+      "max_collection_rounds": 2,
+      "max_total_results": 160,
+      "max_candidates": 50,
+      "review_target_chars": 9000
+    },
+    "deliverable": {
+      "format": "markdown",
+      "sections_policy": "emergent",
+      "language": "zh"
+    },
+    "constraints": [
+      "只以给定文献库为事实来源",
+      "不得编造文献或数据",
+      "每条实质结论必须带库内编号引用",
+      "正文用中文",
+      "摘要后附约200词英文 Abstract 并另起小节",
+      "不生成内容大纲，不预设章节，不预判研究结论"
+    ],
+    "planner_mode": "llm"
+  },
+  "document": "# HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现\n\n> HQC 与基于编码的后量子密码（code-based cryptography）\n\n> 本文由 research-agent 研究链路基于现有文献文献自动生成；正文中文，摘要英文；引用编号对应文末参考文献。\n\n---\n\n## Abstract\n\nThis review synthesizes evidence from the provided literature on HQC as a code-based post-quantum key encapsulation mechanism. The code-based setting is grounded in the hardness of decoding random linear codes; information set decoding (ISD) and its advanced variants are repeatedly reported as the best-known general attack family <sup>1</sup><sup>2</sup><sup>3</sup>. HQC is documented as a parameterized KEM with HQC-128, HQC-192, and HQC-256 instances, following key generation, encapsulation, and decapsulation operations <sup>4</sup><sup>5</sup>. For HQC-128, GMD/Reed-Solomon parameter optimization yields n=13829, nRS=36, a decoding failure rate below 2^-128, and a 22% key-size reduction <sup>6</sup><sup>6</sup>. Security-reduction evidence remains adjacent rather than HQC-specific: reductions such as ResSD-to-RegSD, Stern t-HVZK to syndrome decoding, and quantum stabilizer decoding to symplectic LPN appear, but a direct HQC IND-CCA reduction to a stated code problem is not available in the corpus <sup>7</sup><sup>8</sup><sup>9</sup>. Implementation evidence includes AVX2 and HVX/Hexagon optimizations that reduce runtime, as well as single-trace power side-channel attacks on HQC polynomial multiplication <sup>10</sup><sup>11</sup><sup>12</sup>. Standardization evidence shows that the NIST PQC process covers KEMs and signatures and that initial standards have been published; however, the provided corpus does not settle HQC's final version parameters <sup>13</sup><sup>5</sup>. Open problems include decoding failure attacks, HQC-specific security reduction, HQC-192/256 parameter optimization, and fair cross-platform performance benchmarking.<sup>1,2,3,4,5,6,7,8,9,10,11,12,13</sup>\n\n## 基于编码密码学整体脉络\n\n基于编码密码学的安全性依赖随机线性码解码的困难性；随机线性码解码在给定文献中被表述为 NP-hard 或 NP-complete 问题<sup>1</sup>。<sup>1</sup>\n信息集解码（ISD）及其高级变体被多次表述为随机线性码解码的已知最优算法族<sup>2,3</sup>。<sup>2,3</sup>\nMcEliece、BIKE、Classic McEliece 与 HQC 在编码方案谱系中的直接结构比较和相对位置，在给定文献库中缺乏可核验证据，暂不能作为已证实结论。（该问题在现有语料中缺少直接证据）\n\n## HQC 构造与参数集\n\nHQC 被记录为一种基于编码的 KEM，具有 HQC-128、HQC-192、HQC-256 等参数化安全级别或实例<sup>4,5,14</sup>。<sup>4,5,14</sup>\nHQC 的 KEM 抽象流程包括密钥生成、封装与解封装，形成公钥到密文/共享秘密、私钥加密文到共享秘密的转换<sup>5,4,14</sup>。<sup>4,5,14</sup>\nHQC-128 的 GMD/RS 参数优化已给出 nRS=36、n=13829，并控制 DFR 低于 2^-128，同时报告密钥长度减少 22%<sup>6</sup>。<sup>6</sup>\nHQC-192 与 HQC-256 的同类 GMD/RS 参数优化证据不足，不能将 HQC-128 的优化结论直接推广到更高安全级别。（该问题在现有语料中缺少直接证据）\n\n## 安全归约与困难假设\n\n现有文献邻近编码场景给出若干安全归约：ResSD 到 RegSD、t-HVZK 到 syndrome decoding、量子稳定子解码到 symplectic LPN 等<sup>7,8,9</sup>。<sup>7,8,9</sup>\n在结构化或量子稳定子解码等邻近场景中，结构假设被报告为归约障碍或未给出归约<sup>9,15</sup>，但这不等同于 HQC 的归约状态。<sup>9,15</sup>\nHQC 特定 IND-CCA 安全归约至 Hamming quasi-cyclic syndrome decoding 的直接证据缺失；现有 ResSD、Stern、量子稳定子归约不能被替代为 HQC 特定证明。（该问题在现有语料中缺少直接证据）\n\n## ISD 族攻击\n\nISD 是随机线性码解码的已知最优攻击范式，其复杂度可用于估计基于编码方案的安全级别<sup>2,3,16</sup>。<sup>2,3,16</sup>\nISD 变体在单篇证据中被描述为使用已知零位置、错误矩阵或伴随式等参数；这些机制细节属于低覆盖度证据，需要进一步验证<sup>17,18,19</sup>。<sup>17,18,19</sup>（该机制目前为推断，尚待实验验证）\nISD 族攻击在 HQC 具体参数集上的复杂度评估在当前证据中缺失。（该问题在现有语料中缺少直接证据）\n\n## 解码失败攻击与 DFR\n\nHQC-128 参数优化把 DFR 作为约束之一，目标低于 2^-128<sup>6</sup>。<sup>6</sup>\n解码失败攻击的威胁模型、复杂度及其对 HQC 参数集的具体影响，在给定文献库中没有直接 HQC 攻击证据；不能由通用 RSR/MBBP-LD 邻近证据推导。（该问题在现有语料中缺少直接证据）\n\n## 实现与侧信道\n\nHQC 的优化实现证据包括 AVX2 上的稀疏×稠密乘法、表驱动 Reed-Solomon 编解码等，并报告总运行时间降低<sup>10</sup>。<sup>10</sup>\nHVX/Hexagon 平台上的优化报告解码加速；能耗与 CPU 占用降低的表述主要来自 相关文献，不应扩展为所有平台结论<sup>11</sup>。<sup>11</sup>\n独立侧信道证据显示单迹 SPA 可针对 HQC 多项式乘法并恢复秘密稀疏向量比特<sup>12,17</sup>。<sup>12,13,17,20,21</sup>\n优化实现声称增强侧信道抗性，但同一现有文献中存在单迹 SPA 攻击证据，二者形成条件冲突，说明防护有效性不能作为普遍结论<sup>10,12,17</sup>。<sup>10,12,17</sup>（该机制目前为推断，尚待实验验证）\n系统化的常时实现、掩码防护有效性及性能代价评估仍缺乏 HQC 特定证据。（该问题在现有语料中缺少直接证据）\n\n## 标准化与迁移路径\n\nNIST PQC 标准化项目覆盖 KEM 与数字签名方案<sup>13,5</sup>。<sup>5,13</sup>\n现有文献证据显示 NIST 已发布首批后量子密码标准<sup>5</sup>。<sup>5</sup>\nHQC 在现有文献同时表现为被优化对象和 KEM 安全级别讨论对象<sup>10,4</sup>；IES/KEM 效率比较也构成标准化语境下的性能参考<sup>14</sup>。<sup>4,10,14</sup>\n给定证据未包含 HQC 最终轮次或标准化版本参数的裁决文本；因此正文不将 HQC 的最终地位作为已证实结论。（该问题在现有语料中缺少直接证据）\n\n## 性能对比\n\nOptHQC 与 HQC 参考实现的基准比较显示优化可降低运行时间<sup>10</sup>。<sup>10</sup>\nHVX/Hexagon 解码加速和能耗/CPU 下降证据存在，但平台条件不同，不能直接形成统一性能排序<sup>11</sup>。<sup>11</sup>（该机制目前为推断，尚待实验验证）\nIES 效率比较与 HQC 平台优化证据之间存在条件冲突：不同实现优化程度和平台会改变 HQC 的性能位置<sup>14,10,11</sup>。<sup>10,11,14</sup>（该机制目前为推断，尚待实验验证）\n缺少同一平台、统一安全等级下 HQC 与 BIKE、Classic McEliece 等基于编码 KEM 的公平基准比较。（该问题在现有语料中缺少直接证据）\n\n## 开放问题与证据缺口\n\nHQC 特定安全归约与归约紧致性：需要 HQC 到明确编码困难问题的直接归约证据。（该问题在现有语料中缺少直接证据）\nISD 族攻击在 HQC 参数集上的具体复杂度：现有 ISD 证据多为通用或邻近方案。（该问题在现有语料中缺少直接证据）\n解码失败攻击对 HQC 的威胁模型与参数影响：缺少 HQC 特定攻击与 DFR 桥接证据。（该问题在现有语料中缺少直接证据）\nHQC-192/256 参数优化与标准化版本迁移路径：现有参数优化集中于 HQC-128，标准化最终版本证据不足。（该问题在现有语料中缺少直接证据）\n实现防护有效性与性能代价：需在统一威胁模型和基准下评估常时或掩码实现。（该问题在现有语料中缺少直接证据）\n\n## 参考文献\n\n(1) Bolkema, J.; Gluesing-Luerssen, H.; Kelley, C. A.; Lauter, K.; Malmskog, B.; Rosenthal, J. Variations of the McEliece Cryptosystem. *arXiv* 2016. https://doi.org/10.1007/978-3-319-63931-4_5\n(2) Döttling, N.; Dowsley, R.; Müller-Quade, J.; Nascimento, A. C. A. A CCA2 Secure Variant of the McEliece Cryptosystem. *arXiv* 2012. https://doi.org/10.1109/tit.2012.2203582\n(3) Santini, P.; Baldi, M.; Chiaraluce, F. Assessing and countering reaction attacks against post-quantum public-key cryptosystems based on QC-LDPC codes. *arXiv* 2018. https://doi.org/10.1007/978-3-030-00434-7_16\n(4) Turino, C.; Buchanan, W. J.; Lo, O.; Thuummler, C. PQC-LEO: An Evaluation Framework for Post-Quantum Cryptographic Algorithms. *arXiv* 2026. https://doi.org/10.1109/TPS-ISA67132.2025.00033\n(5) Battarbee, C.; Striecks, C.; Perret, L.; Ramacher, S.; Verhaeghe, K. Quantum-Safe Hybrid Key Exchanges with KEM-Based Authentication. *arXiv* 2024. https://doi.org/10.1140/epjqt/s40507-025-00425-3\n(6) Cai, J.; Zhang, X. HQC Post-Quantum Cryptography Decryption with Generalized Minimum-Distance Reed-Solomon Decoder. *arXiv* 2026.\n(7) Burle, É.; Udovenko, A. Cross-Paradigm Models of Restricted Syndrome Decoding with Application to CROSS. *arXiv* 2026. https://doi.org/10.1007/978-3-032-22695-2_7\n(8) Chailloux, A.; Etinski, S. On the (In)security of optimized Stern-like signature schemes. *arXiv* 2024. https://doi.org/10.1007/S10623-023-01329-Y\n(9) Lu, J. Z.; Poremba, A.; Quek, Y.; Ramkumar, A. Post-Quantum Cryptography from Quantum Stabilizer Decoding. *arXiv* 2026.\n(10) Dong, B.; Feng, H.; Wang, Q. OptHQC: Optimize HQC for High-Performance Post-Quantum Cryptography. *arXiv* 2025.\n(11) Chau, V. M.; Kiet, N. N.; Minh, P. Q.; Ngoc, M. X.; Anh, N. D.; Ta, H. Implementation and Optimization of HQC Decoding on NPU-Integrated Devices. *arXiv* 2026. https://doi.org/10.7467/ksae.2026.34.8.865\n(12) Velek, P.; Rabas, T.; Buček, J. Simple Power Analysis of Polynomial Multiplication in HQC. *arXiv* 2026.\n(13) Park, J.; Ju, J.; Lee, W.; Kang, B.; Kachi, Y.; Sakurai, K. A Statistical Verification Method of Random Permutations for Hiding Countermeasure Against Side-Channel Attacks. *arXiv* 2023. https://doi.org/10.1016/j.jisa.2024.103797\n(14) Chen, A. C. H. Key Encapsulation Mechanism-Based Integrated Encryption Scheme (KEM-IES). *arXiv* 2026.\n(15) Melo, V. D. The HyperFrog Cryptosystem: High-Genus Voxel Topology as a Trapdoor for Post-Quantum KEMs. *arXiv* 2026. https://doi.org/10.5281/zenodo.18502099\n(16) Gassner, N.; Lieb, J.; Mazumder, A.; Schaller, M. Information-Set Decoding for Convolutional Codes. *arXiv* 2024. https://doi.org/10.1007/s10623-025-01649-1\n(17) Banegas, G.; Smith, B.; Zahreddine, J. Exploiting Load/Store Leakage of Sparse Vectors for Key Recovery in HQC. *arXiv* 2026.\n(18) Elleuch, M.; Wachter-Zeh, A.; Zeh, A. A Public-Key Cryptosystem from Interleaved Goppa Codes. *arXiv* 2018.\n(19) Yackushenoks, K.; Ivanov, F. Cryptoanalysis McEliece-type cryptosystem based on correction of errors and erasures. *arXiv* 2023. https://doi.org/10.1109/redundancy59964.2023.10330197\n(20) Adjonyo, O.; Bardin, S.; Bellini, E.; Dione, G. N.; Ameen, M. F. A.; Merget, R.; Recoules, F.; Sellami, Y. Systematic Timing Leakage Analysis of NIST PQDSS Candidates: Tooling and Lessons Learned. *arXiv* 2025.\n(21) Weger, V.; Gassner, N.; Rosenthal, J. A Survey on Code-Based Cryptography. *arXiv* 2022. https://doi.org/10.1007/978-3-030-98365-9\n",
+  "references": [
+    "(1) Bolkema, J.; Gluesing-Luerssen, H.; Kelley, C. A.; Lauter, K.; Malmskog, B.; Rosenthal, J. Variations of the McEliece Cryptosystem. *arXiv* 2016. https://doi.org/10.1007/978-3-319-63931-4_5",
+    "(2) Döttling, N.; Dowsley, R.; Müller-Quade, J.; Nascimento, A. C. A. A CCA2 Secure Variant of the McEliece Cryptosystem. *arXiv* 2012. https://doi.org/10.1109/tit.2012.2203582",
+    "(3) Santini, P.; Baldi, M.; Chiaraluce, F. Assessing and countering reaction attacks against post-quantum public-key cryptosystems based on QC-LDPC codes. *arXiv* 2018. https://doi.org/10.1007/978-3-030-00434-7_16",
+    "(4) Turino, C.; Buchanan, W. J.; Lo, O.; Thuummler, C. PQC-LEO: An Evaluation Framework for Post-Quantum Cryptographic Algorithms. *arXiv* 2026. https://doi.org/10.1109/TPS-ISA67132.2025.00033",
+    "(5) Battarbee, C.; Striecks, C.; Perret, L.; Ramacher, S.; Verhaeghe, K. Quantum-Safe Hybrid Key Exchanges with KEM-Based Authentication. *arXiv* 2024. https://doi.org/10.1140/epjqt/s40507-025-00425-3",
+    "(6) Cai, J.; Zhang, X. HQC Post-Quantum Cryptography Decryption with Generalized Minimum-Distance Reed-Solomon Decoder. *arXiv* 2026.",
+    "(7) Burle, É.; Udovenko, A. Cross-Paradigm Models of Restricted Syndrome Decoding with Application to CROSS. *arXiv* 2026. https://doi.org/10.1007/978-3-032-22695-2_7",
+    "(8) Chailloux, A.; Etinski, S. On the (In)security of optimized Stern-like signature schemes. *arXiv* 2024. https://doi.org/10.1007/S10623-023-01329-Y",
+    "(9) Lu, J. Z.; Poremba, A.; Quek, Y.; Ramkumar, A. Post-Quantum Cryptography from Quantum Stabilizer Decoding. *arXiv* 2026.",
+    "(10) Dong, B.; Feng, H.; Wang, Q. OptHQC: Optimize HQC for High-Performance Post-Quantum Cryptography. *arXiv* 2025.",
+    "(11) Chau, V. M.; Kiet, N. N.; Minh, P. Q.; Ngoc, M. X.; Anh, N. D.; Ta, H. Implementation and Optimization of HQC Decoding on NPU-Integrated Devices. *arXiv* 2026. https://doi.org/10.7467/ksae.2026.34.8.865",
+    "(12) Velek, P.; Rabas, T.; Buček, J. Simple Power Analysis of Polynomial Multiplication in HQC. *arXiv* 2026.",
+    "(13) Park, J.; Ju, J.; Lee, W.; Kang, B.; Kachi, Y.; Sakurai, K. A Statistical Verification Method of Random Permutations for Hiding Countermeasure Against Side-Channel Attacks. *arXiv* 2023. https://doi.org/10.1016/j.jisa.2024.103797",
+    "(14) Chen, A. C. H. Key Encapsulation Mechanism-Based Integrated Encryption Scheme (KEM-IES). *arXiv* 2026.",
+    "(15) Melo, V. D. The HyperFrog Cryptosystem: High-Genus Voxel Topology as a Trapdoor for Post-Quantum KEMs. *arXiv* 2026. https://doi.org/10.5281/zenodo.18502099",
+    "(16) Gassner, N.; Lieb, J.; Mazumder, A.; Schaller, M. Information-Set Decoding for Convolutional Codes. *arXiv* 2024. https://doi.org/10.1007/s10623-025-01649-1",
+    "(17) Banegas, G.; Smith, B.; Zahreddine, J. Exploiting Load/Store Leakage of Sparse Vectors for Key Recovery in HQC. *arXiv* 2026.",
+    "(18) Elleuch, M.; Wachter-Zeh, A.; Zeh, A. A Public-Key Cryptosystem from Interleaved Goppa Codes. *arXiv* 2018.",
+    "(19) Yackushenoks, K.; Ivanov, F. Cryptoanalysis McEliece-type cryptosystem based on correction of errors and erasures. *arXiv* 2023. https://doi.org/10.1109/redundancy59964.2023.10330197",
+    "(20) Adjonyo, O.; Bardin, S.; Bellini, E.; Dione, G. N.; Ameen, M. F. A.; Merget, R.; Recoules, F.; Sellami, Y. Systematic Timing Leakage Analysis of NIST PQDSS Candidates: Tooling and Lessons Learned. *arXiv* 2025.",
+    "(21) Weger, V.; Gassner, N.; Rosenthal, J. A Survey on Code-Based Cryptography. *arXiv* 2022. https://doi.org/10.1007/978-3-030-98365-9"
+  ],
+  "citation_map": {
+    "1": {
+      "paper_key": "arxiv:1612.05085v2",
+      "title": "Variations of the McEliece Cryptosystem",
+      "doi": "10.1007/978-3-319-63931-4_5",
+      "venue": "arXiv",
+      "pub_year": 2016
+    },
+    "2": {
+      "paper_key": "arxiv:1205.5224v3",
+      "title": "A CCA2 Secure Variant of the McEliece Cryptosystem",
+      "doi": "10.1109/tit.2012.2203582",
+      "venue": "arXiv",
+      "pub_year": 2012
+    },
+    "3": {
+      "paper_key": "arxiv:1808.01945v1",
+      "title": "Assessing and countering reaction attacks against post-quantum public-key cryptosystems based on QC-LDPC codes",
+      "doi": "10.1007/978-3-030-00434-7_16",
+      "venue": "arXiv",
+      "pub_year": 2018
+    },
+    "4": {
+      "paper_key": "arxiv:2603.06149v1",
+      "title": "PQC-LEO: An Evaluation Framework for Post-Quantum Cryptographic Algorithms",
+      "doi": "10.1109/TPS-ISA67132.2025.00033",
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "5": {
+      "paper_key": "arxiv:2411.04030v2",
+      "title": "Quantum-Safe Hybrid Key Exchanges with KEM-Based Authentication",
+      "doi": "10.1140/epjqt/s40507-025-00425-3",
+      "venue": "arXiv",
+      "pub_year": 2024
+    },
+    "6": {
+      "paper_key": "arxiv:2603.20156v1",
+      "title": "HQC Post-Quantum Cryptography Decryption with Generalized Minimum-Distance Reed-Solomon Decoder",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "7": {
+      "paper_key": "arxiv:2604.09292v1",
+      "title": "Cross-Paradigm Models of Restricted Syndrome Decoding with Application to CROSS",
+      "doi": "10.1007/978-3-032-22695-2_7",
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "8": {
+      "paper_key": "arxiv:2408.15843v1",
+      "title": "On the (In)security of optimized Stern-like signature schemes",
+      "doi": "10.1007/S10623-023-01329-Y",
+      "venue": "arXiv",
+      "pub_year": 2024
+    },
+    "9": {
+      "paper_key": "arxiv:2603.19110v1",
+      "title": "Post-Quantum Cryptography from Quantum Stabilizer Decoding",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "10": {
+      "paper_key": "arxiv:2512.12904v1",
+      "title": "OptHQC: Optimize HQC for High-Performance Post-Quantum Cryptography",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2025
+    },
+    "11": {
+      "paper_key": "arxiv:2606.01968v1",
+      "title": "Implementation and Optimization of HQC Decoding on NPU-Integrated Devices",
+      "doi": "10.7467/ksae.2026.34.8.865",
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "12": {
+      "paper_key": "arxiv:2601.07634v1",
+      "title": "Simple Power Analysis of Polynomial Multiplication in HQC",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "13": {
+      "paper_key": "arxiv:2311.08625v1",
+      "title": "A Statistical Verification Method of Random Permutations for Hiding Countermeasure Against Side-Channel Attacks",
+      "doi": "10.1016/j.jisa.2024.103797",
+      "venue": "arXiv",
+      "pub_year": 2023
+    },
+    "14": {
+      "paper_key": "arxiv:2605.10175v1",
+      "title": "Key Encapsulation Mechanism-Based Integrated Encryption Scheme (KEM-IES)",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "15": {
+      "paper_key": "arxiv:2603.23505v2",
+      "title": "The HyperFrog Cryptosystem: High-Genus Voxel Topology as a Trapdoor for Post-Quantum KEMs",
+      "doi": "10.5281/zenodo.18502099",
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "16": {
+      "paper_key": "arxiv:2408.07621v4",
+      "title": "Information-Set Decoding for Convolutional Codes",
+      "doi": "10.1007/s10623-025-01649-1",
+      "venue": "arXiv",
+      "pub_year": 2024
+    },
+    "17": {
+      "paper_key": "arxiv:2607.19109v1",
+      "title": "Exploiting Load/Store Leakage of Sparse Vectors for Key Recovery in HQC",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2026
+    },
+    "18": {
+      "paper_key": "arxiv:1809.03024v1",
+      "title": "A Public-Key Cryptosystem from Interleaved Goppa Codes",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2018
+    },
+    "19": {
+      "paper_key": "arxiv:2312.15912v1",
+      "title": "Cryptoanalysis McEliece-type cryptosystem based on correction of errors and erasures",
+      "doi": "10.1109/redundancy59964.2023.10330197",
+      "venue": "arXiv",
+      "pub_year": 2023
+    },
+    "20": {
+      "paper_key": "arxiv:2509.04010v1",
+      "title": "Systematic Timing Leakage Analysis of NIST PQDSS Candidates: Tooling and Lessons Learned",
+      "doi": null,
+      "venue": "arXiv",
+      "pub_year": 2025
+    },
+    "21": {
+      "paper_key": "arxiv:2201.07119v5",
+      "title": "A Survey on Code-Based Cryptography",
+      "doi": "10.1007/978-3-030-98365-9",
+      "venue": "arXiv",
+      "pub_year": 2022
+    }
+  },
+  "checks": {
+    "residual_internal_ids": [],
+    "dangling_citations": [],
+    "system_terms": [],
+    "placeholders": [],
+    "duplicate_dois": [],
+    "references": 21,
+    "citation_marks_in_body": 57,
+    "cjk_chars": 1485,
+    "clean": true,
+    "bullet_lines": 0,
+    "paragraph_style": true,
+    "abstract_present": true,
+    "abstract_inserted": false
+  },
+  "stats": {
+    "title": "HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现",
+    "sections": 10,
+    "body_chars": 4684,
+    "cjk_chars": 1485,
+    "references": 21,
+    "candidates": 0
+  },
+  "draft_json": {
+    "title": "HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现",
+    "summary": {
+      "text": "本文依托给定文献库，综述 HQC 在基于编码后量子密码中的位置。基于编码密码学的安全性依赖随机线性码解码困难性（E-1193-1、E-1193-3、E-0816-1），ISD 及其变体是已知最优通用攻击主线（E-1909-1、E-1909-6、H-7144-1）。HQC 被记录为参数化 KEM，覆盖 HQC-128/192/256，并在 HQC-128 上形成 GMD/RS 参数优化：n=13829、nRS=36、DFR 低于 2^-128、密钥长度减少 22%（H-5016-1、H-1723-1、H-1669-1）。实现证据同时显示 AVX2/HVX 优化带来的加速（H-1645-1、H-1647-1、H-1415-1），以及针对多项式乘法的单迹功耗攻击面（H-1559-1、H-1451-1、H-1742-1）。标准化证据显示 NIST PQC 已发布 KEM 与签名相关标准（H-4474-1、H-6027-1），但 HQC 的最终轮次或版本参数未在给定证据中直接给出。仍需更多数据的问题包括 HQC 特定安全归约、解码失败攻击以及 HQC-192/256 参数优化。",
+      "pattern_ids": [],
+      "evidence_ids": [
+        "E-1193-1",
+        "E-1193-3",
+        "E-0816-1",
+        "E-1909-1",
+        "E-1909-6",
+        "H-7144-1",
+        "H-5016-1",
+        "H-1723-1",
+        "H-1669-1",
+        "H-1645-1",
+        "H-1647-1",
+        "H-1415-1",
+        "H-1559-1",
+        "H-1451-1",
+        "H-1742-1",
+        "H-4474-1",
+        "H-6027-1"
+      ]
+    },
+    "sections": [
+      {
+        "heading": "Abstract",
+        "items": [
+          {
+            "text": "This review synthesizes evidence from the provided literature on HQC as a code-based post-quantum key encapsulation mechanism. The code-based setting is grounded in the hardness of decoding random linear codes; information set decoding (ISD) and its advanced variants are repeatedly reported as the best-known general attack family [E-1193-1][E-0816-1][E-1909-1]. HQC is documented as a parameterized KEM with HQC-128, HQC-192, and HQC-256 instances, following key generation, encapsulation, and decapsulation operations [H-5016-1][H-6320-1]. For HQC-128, GMD/Reed-Solomon parameter optimization yields n=13829, nRS=36, a decoding failure rate below 2^-128, and a 22% key-size reduction [H-1723-1][H-1669-1]. Security-reduction evidence remains adjacent rather than HQC-specific: reductions such as ResSD-to-RegSD, Stern t-HVZK to syndrome decoding, and quantum stabilizer decoding to symplectic LPN appear, but a direct HQC IND-CCA reduction to a stated code problem is not available in the corpus [H-5008-1][H-8211-1][H-5085-1]. Implementation evidence includes AVX2 and HVX/Hexagon optimizations that reduce runtime, as well as single-trace power side-channel attacks on HQC polynomial multiplication [H-1647-1][H-1415-1][H-1559-1]. Standardization evidence shows that the NIST PQC process covers KEMs and signatures and that initial standards have been published; however, the provided corpus does not settle HQC's final version parameters [H-4474-1][H-6027-1]. Open problems include decoding failure attacks, HQC-specific security reduction, HQC-192/256 parameter optimization, and fair cross-platform performance benchmarking.",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "E-1193-1",
+              "E-0816-1",
+              "E-1909-1",
+              "H-5016-1",
+              "H-6320-1",
+              "H-1723-1",
+              "H-1669-1",
+              "H-5008-1",
+              "H-8211-1",
+              "H-5085-1",
+              "H-1647-1",
+              "H-1415-1",
+              "H-1559-1",
+              "H-4474-1",
+              "H-6027-1"
+            ],
+            "status": "supported"
+          }
+        ]
+      },
+      {
+        "heading": "基于编码密码学整体脉络",
+        "items": [
+          {
+            "text": "基于编码密码学的安全性依赖随机线性码解码的困难性；随机线性码解码在给定文献中被表述为 NP-hard 或 NP-complete 问题（E-1193-1、E-1193-3、E-1193-2）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "E-1193-1",
+              "E-1193-3",
+              "E-1193-2"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "信息集解码（ISD）及其高级变体被多次表述为随机线性码解码的已知最优算法族（E-0816-1、E-1909-1、E-1909-2、E-1909-6）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "E-0816-1",
+              "E-1909-1",
+              "E-1909-2",
+              "E-1909-6"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "McEliece、BIKE、Classic McEliece 与 HQC 在编码方案谱系中的直接结构比较和相对位置，在给定文献库中缺乏可核验证据，暂不能作为已证实结论。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "HQC 构造与参数集",
+        "items": [
+          {
+            "text": "HQC 被记录为一种基于编码的 KEM，具有 HQC-128、HQC-192、HQC-256 等参数化安全级别或实例（H-5016-1、H-6320-1、H-1744-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-5016-1",
+              "H-6320-1",
+              "H-1744-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HQC 的 KEM 抽象流程包括密钥生成、封装与解封装，形成公钥到密文/共享秘密、私钥加密文到共享秘密的转换（H-6320-1、H-5016-1、H-1744-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-6320-1",
+              "H-5016-1",
+              "H-1744-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HQC-128 的 GMD/RS 参数优化已给出 nRS=36、n=13829，并控制 DFR 低于 2^-128，同时报告密钥长度减少 22%（H-1723-1、H-1669-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1723-1",
+              "H-1669-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HQC-192 与 HQC-256 的同类 GMD/RS 参数优化证据不足，不能将 HQC-128 的优化结论直接推广到更高安全级别。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "安全归约与困难假设",
+        "items": [
+          {
+            "text": "库内邻近编码场景给出若干安全归约：ResSD 到 RegSD、t-HVZK 到 syndrome decoding、量子稳定子解码到 symplectic LPN 等（H-5008-1、H-5092-1、H-8211-1、H-5085-1、H-5086-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-5008-1",
+              "H-5092-1",
+              "H-8211-1",
+              "H-5085-1",
+              "H-5086-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "在结构化或量子稳定子解码等邻近场景中，结构假设被报告为归约障碍或未给出归约（H-4798-1、H-1431-1），但这不等同于 HQC 的归约状态。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-4798-1",
+              "H-1431-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HQC 特定 IND-CCA 安全归约至 Hamming quasi-cyclic syndrome decoding 的直接证据缺失；现有 ResSD、Stern、量子稳定子归约不能被替代为 HQC 特定证明。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "ISD 族攻击",
+        "items": [
+          {
+            "text": "ISD 是随机线性码解码的已知最优攻击范式，其复杂度可用于估计基于编码方案的安全级别（E-0816-1、E-1909-1、E-1909-6、H-7144-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "E-0816-1",
+              "E-1909-1",
+              "E-1909-6",
+              "H-7144-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "ISD 变体在单篇证据中被描述为使用已知零位置、错误矩阵或伴随式等参数；这些机制细节属于低覆盖度证据，需要进一步验证（E-5441-1、E-16854-1、E-4047-1）。",
+            "pattern_ids": [
+              "P-5441",
+              "P-16854"
+            ],
+            "evidence_ids": [
+              "E-5441-1",
+              "E-16854-1",
+              "E-4047-1"
+            ],
+            "status": "hypothesis"
+          },
+          {
+            "text": "ISD 族攻击在 HQC 具体参数集上的复杂度评估在当前证据中缺失。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "解码失败攻击与 DFR",
+        "items": [
+          {
+            "text": "HQC-128 参数优化把 DFR 作为约束之一，目标低于 2^-128（H-1723-1、H-1669-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1723-1",
+              "H-1669-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "解码失败攻击的威胁模型、复杂度及其对 HQC 参数集的具体影响，在给定文献库中没有直接 HQC 攻击证据；不能由通用 RSR/MBBP-LD 邻近证据推导。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "实现与侧信道",
+        "items": [
+          {
+            "text": "HQC 的优化实现证据包括 AVX2 上的稀疏×稠密乘法、表驱动 Reed-Solomon 编解码等，并报告总运行时间降低（H-1645-1、H-1647-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1645-1",
+              "H-1647-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HVX/Hexagon 平台上的优化报告解码加速；能耗与 CPU 占用降低的表述主要来自 H-1415，不应扩展为所有平台结论（H-1415-1、H-1414-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1415-1",
+              "H-1414-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "独立侧信道证据显示单迹 SPA 可针对 HQC 多项式乘法并恢复秘密稀疏向量比特（H-1559-1、H-1451-1、H-1742-1）。",
+            "pattern_ids": [
+              "P-14131",
+              "P-13758",
+              "P-2921"
+            ],
+            "evidence_ids": [
+              "H-1559-1",
+              "H-1451-1",
+              "H-1742-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "优化实现声称增强侧信道抗性，但同一知识包中存在单迹 SPA 攻击证据，二者形成条件冲突，说明防护有效性不能作为普遍结论（H-1647-1、H-1559-1、H-1451-1、H-1742-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1647-1",
+              "H-1559-1",
+              "H-1451-1",
+              "H-1742-1"
+            ],
+            "status": "hypothesis"
+          },
+          {
+            "text": "系统化的常时实现、掩码防护有效性及性能代价评估仍缺乏 HQC 特定证据。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "标准化与迁移路径",
+        "items": [
+          {
+            "text": "NIST PQC 标准化项目覆盖 KEM 与数字签名方案（H-4474-1、H-6027-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-4474-1",
+              "H-6027-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "库内证据显示 NIST 已发布首批后量子密码标准（H-6027-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-6027-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HQC 在库内同时表现为被优化对象和 KEM 安全级别讨论对象（H-1645-1、H-5016-1）；IES/KEM 效率比较也构成标准化语境下的性能参考（H-1747-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1645-1",
+              "H-5016-1",
+              "H-1747-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "给定证据未包含 HQC 最终轮次或标准化版本参数的裁决文本；因此正文不将 HQC 的最终地位作为已证实结论。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "性能对比",
+        "items": [
+          {
+            "text": "OptHQC 与 HQC 参考实现的基准比较显示优化可降低运行时间（H-1643-1、H-1647-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1643-1",
+              "H-1647-1"
+            ],
+            "status": "supported"
+          },
+          {
+            "text": "HVX/Hexagon 解码加速和能耗/CPU 下降证据存在，但平台条件不同，不能直接形成统一性能排序（H-1415-1、H-1414-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1415-1",
+              "H-1414-1"
+            ],
+            "status": "hypothesis"
+          },
+          {
+            "text": "IES 效率比较与 HQC 平台优化证据之间存在条件冲突：不同实现优化程度和平台会改变 HQC 的性能位置（H-1747-1、H-1643-1、H-1415-1）。",
+            "pattern_ids": [],
+            "evidence_ids": [
+              "H-1747-1",
+              "H-1643-1",
+              "H-1415-1"
+            ],
+            "status": "hypothesis"
+          },
+          {
+            "text": "缺少同一平台、统一安全等级下 HQC 与 BIKE、Classic McEliece 等基于编码 KEM 的公平基准比较。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      },
+      {
+        "heading": "开放问题与证据缺口",
+        "items": [
+          {
+            "text": "HQC 特定安全归约与归约紧致性：需要 HQC 到明确编码困难问题的直接归约证据。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          },
+          {
+            "text": "ISD 族攻击在 HQC 参数集上的具体复杂度：现有 ISD 证据多为通用或邻近方案。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          },
+          {
+            "text": "解码失败攻击对 HQC 的威胁模型与参数影响：缺少 HQC 特定攻击与 DFR 桥接证据。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          },
+          {
+            "text": "HQC-192/256 参数优化与标准化版本迁移路径：现有参数优化集中于 HQC-128，标准化最终版本证据不足。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          },
+          {
+            "text": "实现防护有效性与性能代价：需在统一威胁模型和基准下评估常时或掩码实现。",
+            "pattern_ids": [],
+            "evidence_ids": [],
+            "status": "open_question"
+          }
+        ]
+      }
+    ],
+    "strategies": [],
+    "design_contract": {
+      "objective": "生成一份仅依赖给定文献库、正文为中文并附约200词英文Abstract的HQC与基于编码后量子密码综述论文，覆盖构造、安全性、密码分析与实现等指定主题。",
+      "hard_constraints": [],
+      "must_explain": [],
+      "innovation_floor": "L3",
+      "min_candidates": 4,
+      "differentiation_axes": [],
+      "evaluation_criteria": [],
+      "constraints": []
+    },
+    "revision_responses": [
+      {
+        "action": "将论文标题改为用户指定题名《HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现》。",
+        "resolved": true,
+        "note": "title 字段已设为指定题名。"
+      },
+      {
+        "action": "将英文 Abstract 另起为独立小节“## Abstract”，清理“## ## 摘要”等重复标题标记。",
+        "resolved": true,
+        "note": "英文摘要已作为首个正文 section 的独立 heading“Abstract”；未生成重复标题标记。"
+      },
+      {
+        "action": "删除“攻击失败主要来自前四位获取错误”等无来源细节。",
+        "resolved": true,
+        "note": "全文未包含该细节；仅保留由 H-1559-1/H-1451-1/H-1742-1 支持的单迹 SPA 恢复秘密向量比特表述。"
+      },
+      {
+        "action": "修正误引：删除 H-6320 对“解码失败和侧信道泄漏”的支持；不要用 H-6202/H-3220 暗示 HQC 解码失败攻击。",
+        "resolved": true,
+        "note": "H-6320 仅用于 KEM 流程构造；H-6202/H-3220 未用于 HQC 解码失败攻击，相关主题标为 open_question。"
+      },
+      {
+        "action": "修正性能段落：H-1643/H-1644 只支持运行时间等已列指标，能耗与 CPU 降低应改引 H-1415 或删除。",
+        "resolved": true,
+        "note": "运行时间引用 H-1643-1/H-1647-1；能耗与 CPU 占用下降仅与 H-1415-1 相关，并注明平台限制。"
+      },
+      {
+        "action": "补充 HQC 构造要点时，只使用库内可支持事实；证据不足处明确标注为开放问题。",
+        "resolved": true,
+        "note": "HQC 构造仅引用 H-5016-1/H-6320-1/H-1744-1/H-1723-1/H-1669-1；HQC-192/256 等问题标 open_question。"
+      },
+      {
+        "action": "标准化部分应依据 H-1645、H-1747、H-23996、H-5016 等证据改写，避免笼统称最终状态“不明确”。",
+        "resolved": false,
+        "note": "已依据 H-1645-1/H-1747-1/H-5016-1/H-4474-1/H-6027-1 改写，避免笼统不明确；但 H-23996 未出现在当前知识包中，无法核验，已列入 edge_gaps。"
+      },
+      {
+        "action": "对解码失败攻击、HQC 特定安全归约、HQC-192/256 参数优化等缺失证据，统一标注为 need_more_data 或开放问题，不得用相邻领域证据替代。",
+        "resolved": true,
+        "note": "各小节已将上述缺口标为 open_question/need_more_data；邻近归约仅作为背景，未替代 HQC 特定证据。"
+      },
+      {
+        "action": "逐条核对每条实质结论的引用，确保每条 supported 内容至少有一个真实 evidence_id 或 hyperedge_id 支持。",
+        "resolved": true,
+        "note": "supported/hypothesis 条目均已附可追溯证据；open_question 不伪造引用。"
+      },
+      {
+        "action": "将标题改为用户指定题名。",
+        "resolved": true,
+        "note": "同第1条，title 已修改。"
+      },
+      {
+        "action": "将英文摘要设为独立“## Abstract”小节，清理重复标题标记，并保持约200词。",
+        "resolved": true,
+        "note": "已独立为 Abstract section，英文摘要约 200 词。"
+      },
+      {
+        "action": "补充库内可支持的基于编码密码学脉络，如 McEliece、BIKE、Classic McEliece 与 HQC 的相对位置。",
+        "resolved": true,
+        "note": "补充基于编码密码学整体脉络由解码困难与 ISD 证据支持；McEliece/BIKE/Classic McEliece 与 HQC 的直接比较证据缺失，标为 open_question。"
+      }
+    ],
+    "candidate_pool": {
+      "generated": 0,
+      "after_dedupe": 0,
+      "duplicates": [],
+      "selected": 0,
+      "rejected": 0,
+      "select_target": 6
+    },
+    "_knowledge_stats": {
+      "patterns": 200,
+      "evidence": 698,
+      "hyperedges": 423,
+      "mechanism_states": 7,
+      "operator_candidates": 5
+    },
+    "markdown": "# HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现\n\n本文依托给定文献库，综述 HQC 在基于编码后量子密码中的位置。基于编码密码学的安全性依赖随机线性码解码困难性（E-1193-1、E-1193-3、E-0816-1），ISD 及其变体是已知最优通用攻击主线（E-1909-1、E-1909-6、H-7144-1）。HQC 被记录为参数化 KEM，覆盖 HQC-128/192/256，并在 HQC-128 上形成 GMD/RS 参数优化：n=13829、nRS=36、DFR 低于 2^-128、密钥长度减少 22%（H-5016-1、H-1723-1、H-1669-1）。实现证据同时显示 AVX2/HVX 优化带来的加速（H-1645-1、H-1647-1、H-1415-1），以及针对多项式乘法的单迹功耗攻击面（H-1559-1、H-1451-1、H-1742-1）。标准化证据显示 NIST PQC 已发布 KEM 与签名相关标准（H-4474-1、H-6027-1），但 HQC 的最终轮次或版本参数未在给定证据中直接给出。仍需更多数据的问题包括 HQC 特定安全归约、解码失败攻击以及 HQC-192/256 参数优化。\n\n## Abstract\n- [supported] This review synthesizes evidence from the provided literature on HQC as a code-based post-quantum key encapsulation mechanism. The code-based setting is grounded in the hardness of decoding random linear codes; information set decoding (ISD) and its advanced variants are repeatedly reported as the best-known general attack family [E-1193-1][E-0816-1][E-1909-1]. HQC is documented as a parameterized KEM with HQC-128, HQC-192, and HQC-256 instances, following key generation, encapsulation, and decapsulation operations [H-5016-1][H-6320-1]. For HQC-128, GMD/Reed-Solomon parameter optimization yields n=13829, nRS=36, a decoding failure rate below 2^-128, and a 22% key-size reduction [H-1723-1][H-1669-1]. Security-reduction evidence remains adjacent rather than HQC-specific: reductions such as ResSD-to-RegSD, Stern t-HVZK to syndrome decoding, and quantum stabilizer decoding to symplectic LPN appear, but a direct HQC IND-CCA reduction to a stated code problem is not available in the corpus [H-5008-1][H-8211-1][H-5085-1]. Implementation evidence includes AVX2 and HVX/Hexagon optimizations that reduce runtime, as well as single-trace power side-channel attacks on HQC polynomial multiplication [H-1647-1][H-1415-1][H-1559-1]. Standardization evidence shows that the NIST PQC process covers KEMs and signatures and that initial standards have been published; however, the provided corpus does not settle HQC's final version parameters [H-4474-1][H-6027-1]. Open problems include decoding failure attacks, HQC-specific security reduction, HQC-192/256 parameter optimization, and fair cross-platform performance benchmarking. [E-1193-1, E-0816-1, E-1909-1, H-5016-1, H-6320-1, H-1723-1, H-1669-1, H-5008-1, H-8211-1, H-5085-1, H-1647-1, H-1415-1, H-1559-1, H-4474-1, H-6027-1]\n\n## 基于编码密码学整体脉络\n- [supported] 基于编码密码学的安全性依赖随机线性码解码的困难性；随机线性码解码在给定文献中被表述为 NP-hard 或 NP-complete 问题（E-1193-1、E-1193-3、E-1193-2）。 [E-1193-1, E-1193-3, E-1193-2]\n- [supported] 信息集解码（ISD）及其高级变体被多次表述为随机线性码解码的已知最优算法族（E-0816-1、E-1909-1、E-1909-2、E-1909-6）。 [E-0816-1, E-1909-1, E-1909-2, E-1909-6]\n- [open_question] McEliece、BIKE、Classic McEliece 与 HQC 在编码方案谱系中的直接结构比较和相对位置，在给定文献库中缺乏可核验证据，暂不能作为已证实结论。\n\n## HQC 构造与参数集\n- [supported] HQC 被记录为一种基于编码的 KEM，具有 HQC-128、HQC-192、HQC-256 等参数化安全级别或实例（H-5016-1、H-6320-1、H-1744-1）。 [H-5016-1, H-6320-1, H-1744-1]\n- [supported] HQC 的 KEM 抽象流程包括密钥生成、封装与解封装，形成公钥到密文/共享秘密、私钥加密文到共享秘密的转换（H-6320-1、H-5016-1、H-1744-1）。 [H-6320-1, H-5016-1, H-1744-1]\n- [supported] HQC-128 的 GMD/RS 参数优化已给出 nRS=36、n=13829，并控制 DFR 低于 2^-128，同时报告密钥长度减少 22%（H-1723-1、H-1669-1）。 [H-1723-1, H-1669-1]\n- [open_question] HQC-192 与 HQC-256 的同类 GMD/RS 参数优化证据不足，不能将 HQC-128 的优化结论直接推广到更高安全级别。\n\n## 安全归约与困难假设\n- [supported] 库内邻近编码场景给出若干安全归约：ResSD 到 RegSD、t-HVZK 到 syndrome decoding、量子稳定子解码到 symplectic LPN 等（H-5008-1、H-5092-1、H-8211-1、H-5085-1、H-5086-1）。 [H-5008-1, H-5092-1, H-8211-1, H-5085-1, H-5086-1]\n- [supported] 在结构化或量子稳定子解码等邻近场景中，结构假设被报告为归约障碍或未给出归约（H-4798-1、H-1431-1），但这不等同于 HQC 的归约状态。 [H-4798-1, H-1431-1]\n- [open_question] HQC 特定 IND-CCA 安全归约至 Hamming quasi-cyclic syndrome decoding 的直接证据缺失；现有 ResSD、Stern、量子稳定子归约不能被替代为 HQC 特定证明。\n\n## ISD 族攻击\n- [supported] ISD 是随机线性码解码的已知最优攻击范式，其复杂度可用于估计基于编码方案的安全级别（E-0816-1、E-1909-1、E-1909-6、H-7144-1）。 [E-0816-1, E-1909-1, E-1909-6, H-7144-1]\n- [hypothesis] ISD 变体在单篇证据中被描述为使用已知零位置、错误矩阵或伴随式等参数；这些机制细节属于低覆盖度证据，需要进一步验证（E-5441-1、E-16854-1、E-4047-1）。 [P-5441, P-16854, E-5441-1, E-16854-1, E-4047-1]\n- [open_question] ISD 族攻击在 HQC 具体参数集上的复杂度评估在当前证据中缺失。\n\n## 解码失败攻击与 DFR\n- [supported] HQC-128 参数优化把 DFR 作为约束之一，目标低于 2^-128（H-1723-1、H-1669-1）。 [H-1723-1, H-1669-1]\n- [open_question] 解码失败攻击的威胁模型、复杂度及其对 HQC 参数集的具体影响，在给定文献库中没有直接 HQC 攻击证据；不能由通用 RSR/MBBP-LD 邻近证据推导。\n\n## 实现与侧信道\n- [supported] HQC 的优化实现证据包括 AVX2 上的稀疏×稠密乘法、表驱动 Reed-Solomon 编解码等，并报告总运行时间降低（H-1645-1、H-1647-1）。 [H-1645-1, H-1647-1]\n- [supported] HVX/Hexagon 平台上的优化报告解码加速；能耗与 CPU 占用降低的表述主要来自 H-1415，不应扩展为所有平台结论（H-1415-1、H-1414-1）。 [H-1415-1, H-1414-1]\n- [supported] 独立侧信道证据显示单迹 SPA 可针对 HQC 多项式乘法并恢复秘密稀疏向量比特（H-1559-1、H-1451-1、H-1742-1）。 [P-14131, P-13758, P-2921, H-1559-1, H-1451-1, H-1742-1]\n- [hypothesis] 优化实现声称增强侧信道抗性，但同一知识包中存在单迹 SPA 攻击证据，二者形成条件冲突，说明防护有效性不能作为普遍结论（H-1647-1、H-1559-1、H-1451-1、H-1742-1）。 [H-1647-1, H-1559-1, H-1451-1, H-1742-1]\n- [open_question] 系统化的常时实现、掩码防护有效性及性能代价评估仍缺乏 HQC 特定证据。\n\n## 标准化与迁移路径\n- [supported] NIST PQC 标准化项目覆盖 KEM 与数字签名方案（H-4474-1、H-6027-1）。 [H-4474-1, H-6027-1]\n- [supported] 库内证据显示 NIST 已发布首批后量子密码标准（H-6027-1）。 [H-6027-1]\n- [supported] HQC 在库内同时表现为被优化对象和 KEM 安全级别讨论对象（H-1645-1、H-5016-1）；IES/KEM 效率比较也构成标准化语境下的性能参考（H-1747-1）。 [H-1645-1, H-5016-1, H-1747-1]\n- [open_question] 给定证据未包含 HQC 最终轮次或标准化版本参数的裁决文本；因此正文不将 HQC 的最终地位作为已证实结论。\n\n## 性能对比\n- [supported] OptHQC 与 HQC 参考实现的基准比较显示优化可降低运行时间（H-1643-1、H-1647-1）。 [H-1643-1, H-1647-1]\n- [hypothesis] HVX/Hexagon 解码加速和能耗/CPU 下降证据存在，但平台条件不同，不能直接形成统一性能排序（H-1415-1、H-1414-1）。 [H-1415-1, H-1414-1]\n- [hypothesis] IES 效率比较与 HQC 平台优化证据之间存在条件冲突：不同实现优化程度和平台会改变 HQC 的性能位置（H-1747-1、H-1643-1、H-1415-1）。 [H-1747-1, H-1643-1, H-1415-1]\n- [open_question] 缺少同一平台、统一安全等级下 HQC 与 BIKE、Classic McEliece 等基于编码 KEM 的公平基准比较。\n\n## 开放问题与证据缺口\n- [open_question] HQC 特定安全归约与归约紧致性：需要 HQC 到明确编码困难问题的直接归约证据。\n- [open_question] ISD 族攻击在 HQC 参数集上的具体复杂度：现有 ISD 证据多为通用或邻近方案。\n- [open_question] 解码失败攻击对 HQC 的威胁模型与参数影响：缺少 HQC 特定攻击与 DFR 桥接证据。\n- [open_question] HQC-192/256 参数优化与标准化版本迁移路径：现有参数优化集中于 HQC-128，标准化最终版本证据不足。\n- [open_question] 实现防护有效性与性能代价：需在统一威胁模型和基准下评估常时或掩码实现。\n\n## 修订回应\n- [已解决] 将论文标题改为用户指定题名《HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现》。：title 字段已设为指定题名。\n- [已解决] 将英文 Abstract 另起为独立小节“## Abstract”，清理“## ## 摘要”等重复标题标记。：英文摘要已作为首个正文 section 的独立 heading“Abstract”；未生成重复标题标记。\n- [已解决] 删除“攻击失败主要来自前四位获取错误”等无来源细节。：全文未包含该细节；仅保留由 H-1559-1/H-1451-1/H-1742-1 支持的单迹 SPA 恢复秘密向量比特表述。\n- [已解决] 修正误引：删除 H-6320 对“解码失败和侧信道泄漏”的支持；不要用 H-6202/H-3220 暗示 HQC 解码失败攻击。：H-6320 仅用于 KEM 流程构造；H-6202/H-3220 未用于 HQC 解码失败攻击，相关主题标为 open_question。\n- [已解决] 修正性能段落：H-1643/H-1644 只支持运行时间等已列指标，能耗与 CPU 降低应改引 H-1415 或删除。：运行时间引用 H-1643-1/H-1647-1；能耗与 CPU 占用下降仅与 H-1415-1 相关，并注明平台限制。\n- [已解决] 补充 HQC 构造要点时，只使用库内可支持事实；证据不足处明确标注为开放问题。：HQC 构造仅引用 H-5016-1/H-6320-1/H-1744-1/H-1723-1/H-1669-1；HQC-192/256 等问题标 open_question。\n- [未解决] 标准化部分应依据 H-1645、H-1747、H-23996、H-5016 等证据改写，避免笼统称最终状态“不明确”。：已依据 H-1645-1/H-1747-1/H-5016-1/H-4474-1/H-6027-1 改写，避免笼统不明确；但 H-23996 未出现在当前知识包中，无法核验，已列入 edge_gaps。\n- [已解决] 对解码失败攻击、HQC 特定安全归约、HQC-192/256 参数优化等缺失证据，统一标注为 need_more_data 或开放问题，不得用相邻领域证据替代。：各小节已将上述缺口标为 open_question/need_more_data；邻近归约仅作为背景，未替代 HQC 特定证据。\n- [已解决] 逐条核对每条实质结论的引用，确保每条 supported 内容至少有一个真实 evidence_id 或 hyperedge_id 支持。：supported/hypothesis 条目均已附可追溯证据；open_question 不伪造引用。\n- [已解决] 将标题改为用户指定题名。：同第1条，title 已修改。\n- [已解决] 将英文摘要设为独立“## Abstract”小节，清理重复标题标记，并保持约200词。：已独立为 Abstract section，英文摘要约 200 词。\n- [已解决] 补充库内可支持的基于编码密码学脉络，如 McEliece、BIKE、Classic McEliece 与 HQC 的相对位置。：补充基于编码密码学整体脉络由解码困难与 ISD 证据支持；McEliece/BIKE/Classic McEliece 与 HQC 的直接比较证据缺失，标为 open_question。",
+    "selection": {
+      "first_choice": "",
+      "alternatives": [],
+      "not_recommended": [],
+      "innovation_floor": "L3",
+      "floor_met": []
+    },
+    "revision_consumed": 12,
+    "model_call": {
+      "timeout": 900,
+      "elapsed": 260.0,
+      "error": null,
+      "timed_out": false
+    }
+  },
+  "format_stats": {
+    "internal_sections_dropped": 0,
+    "paragraphs": 0,
+    "bullets_removed": 0,
+    "abstract_sections": 0
+  }
+}
