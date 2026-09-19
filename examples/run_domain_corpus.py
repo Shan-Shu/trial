@@ -148,6 +148,7 @@ def corpus_stats(db: Path) -> dict:
             "SELECT COUNT(*) FROM ontology_hyperedge_measurements").fetchone()[0]
         return {
             "papers": total, "out_of_scope": excluded,
+            "done_queries": len(meta_get(conn, "corpus_done_queries", []) or []),
             "by_fulltext_source": by_source,
             "clean_chars": chars, "extracted_runs": runs, "nodes": nodes,
             "edges": edges, "hyperedges": sum(r["c"] for r in hyper),
@@ -161,7 +162,8 @@ def corpus_stats(db: Path) -> dict:
 def print_stats(stats: dict, title: str = "统计") -> None:
     print(f"\n=== {title} ===", flush=True)
     print(f"在范围内论文 {stats['papers']} 篇（另有 {stats.get('out_of_scope', 0)} 篇"
-          f"被判为界外）| 正文字符 {stats['clean_chars']:,} | "
+          f"被判为界外）| 已完成检索式 {stats.get('done_queries', 0)} 个 | "
+          f"正文字符 {stats['clean_chars']:,} | "
           f"已提取 {stats['extracted_runs']} 篇", flush=True)
     print(f"全文来源: {stats['by_fulltext_source']}", flush=True)
     print(f"本体: 节点 {stats['nodes']} | 关系边 {stats['edges']} | "
@@ -228,6 +230,74 @@ def fetch(db: Path, args, settings: Settings, profile: dict) -> int:
         if marked["dropped"]:
             print(f"[filter] 语料硬门剔除 {marked['dropped']} 篇界外文献 "
                   f"（示例 {marked['sample'][:5]}）", flush=True)
+        return _paper_count(conn)
+    finally:
+        conn.close()
+
+
+def fetch_skip_known(db: Path, args, settings: Settings, profile: dict) -> int:
+    """追加抓取快路径：先检索、再把**已在库**的记录剔除，只下载新文献。
+
+    与 ``fetch`` 的差别：不走 ``ingest_search_results`` 的内部检索，而是自己检索后
+    复用其相关性硬门与处理管线（``apply_topic_relevance_gate`` + ``_process_records``），
+    从而避免重复下载已在库论文的 PDF（追加检索式与原检索式高度重叠时会省很多时间）。
+    """
+    from research_agent.retrieval.node import (
+        _process_records,
+        apply_topic_relevance_gate,
+    )
+
+    conn = connect(db)
+    try:
+        init_ontology(conn)
+        queries = load_queries(args.domain, args.source, args.queries_file)
+        done = set(meta_get(conn, "corpus_done_queries", []) or [])
+        reports = dict(meta_get(conn, "corpus_query_reports", {}) or {})
+        known = {r["paper_key"] for r in
+                 conn.execute("SELECT paper_key FROM papers")}
+        gate_terms = [t for group in corpus_filter_terms(args.domain)
+                      for t in group]
+        gate_terms += [str(k) for k in
+                       (packs.domain_data(args.domain).get("keywords") or [])]
+        api = ApiHub(source=args.source)
+        policy = str(getattr(settings, "relevance_gate_low_signal", "warn"))
+        todo = [q for q in queries if q not in done]
+        print(f"[fetch-skip] 待跑 {len(todo)} 个检索式（已完成 {len(done)}），"
+              f"库内已有 {len(known)} 篇", flush=True)
+        for i, query in enumerate(todo, 1):
+            if args.max_papers and _paper_count(conn) >= args.max_papers:
+                print(f"[fetch-skip] 已达 --max-papers={args.max_papers}，停止",
+                      flush=True)
+                break
+            t0 = time.time()
+            try:
+                records = api.search(query, max_results=args.per_query)
+                new = [r for r in records
+                       if r.get("paper_key") and r["paper_key"] not in known]
+                kept, dropped = apply_topic_relevance_gate(
+                    new, gate_terms, on_low_signal=policy)
+                out = _process_records(kept, retriever=None, api=api, conn=conn,
+                                       query=query, queries=[query])
+                known.update(out.get("paper_keys") or [])
+                reports[query] = {"hits": len(records), "new": len(new),
+                                  "kept": len(kept), "dropped": len(dropped),
+                                  "ingested": out.get("count")}
+                print(f"[fetch-skip {i}/{len(todo)}] {query} -> 命中 {len(records)} "
+                      f"新增候选 {len(new)} 入库 {out.get('count')} "
+                      f"({time.time() - t0:.0f}s) | 库内 {_paper_count(conn)} 篇",
+                      flush=True)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("检索失败: %s", query)
+                reports[query] = {"error": str(exc)}
+                print(f"[fetch-skip {i}/{len(todo)}] {query} -> 失败 {exc}",
+                      flush=True)
+            done.add(query)
+            meta_set(conn, "corpus_done_queries", sorted(done))
+            meta_set(conn, "corpus_query_reports", reports)
+            conn.commit()
+            marked = mark_out_of_scope(db, args.domain)
+            if marked["dropped"]:
+                print(f"[filter] 累计剔除界外文献 {marked['dropped']} 篇", flush=True)
         return _paper_count(conn)
     finally:
         conn.close()
@@ -360,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--extract-only", action="store_true")
     ap.add_argument("--stats-only", action="store_true")
     ap.add_argument("--redo-queries", action="store_true", help="忽略已完成检索式")
+    ap.add_argument("--skip-known", action="store_true",
+                    help="追加抓取：先检索再剔除已在库记录，只下载新文献（更快）")
     args = ap.parse_args(argv)
 
     db = Path(args.db)
@@ -382,7 +454,8 @@ def main(argv: list[str] | None = None) -> int:
             init.commit()
         finally:
             init.close()
-        total = fetch(db, args, settings, profile)
+        total = (fetch_skip_known(db, args, settings, profile)
+                 if args.skip_known else fetch(db, args, settings, profile))
         stats = corpus_stats(db)
         print_stats(stats, "抓取后统计")
         print(f"[target] 目标 {args.min_papers} 篇，当前 {total} 篇", flush=True)

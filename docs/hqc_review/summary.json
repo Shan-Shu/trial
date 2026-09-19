@@ -1,0 +1,85 @@
+[
+  {
+    "variant": "zh",
+    "status": "manual_review",
+    "decision": "manual_review",
+    "stats": {
+      "title": "HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现",
+      "sections": 9,
+      "body_chars": 3112,
+      "cjk_chars": 1510,
+      "references": 22,
+      "candidates": 0
+    },
+    "checks": {
+      "residual_internal_ids": [
+        "H-1645"
+      ],
+      "dangling_citations": [],
+      "system_terms": [
+        "库内"
+      ],
+      "placeholders": [],
+      "duplicate_dois": [],
+      "references": 22,
+      "citation_marks_in_body": 38,
+      "cjk_chars": 1510,
+      "clean": false
+    }
+  },
+  {
+    "variant": "zh_en",
+    "status": "manual_review",
+    "decision": "manual_review",
+    "stats": {
+      "title": "HQC 与基于编码的后量子密码：构造、安全性、密码分析与实现",
+      "sections": 10,
+      "body_chars": 4684,
+      "cjk_chars": 1485,
+      "references": 21,
+      "candidates": 0
+    },
+    "checks": {
+      "residual_internal_ids": [
+        "H-1415"
+      ],
+      "dangling_citations": [],
+      "system_terms": [
+        "库内"
+      ],
+      "placeholders": [],
+      "duplicate_dois": [],
+      "references": 21,
+      "citation_marks_in_body": 57,
+      "cjk_chars": 1485,
+      "clean": false
+    }
+  },
+  {
+    "variant": "en",
+    "status": "manual_review",
+    "decision": "manual_review",
+    "stats": {
+      "title": "HQC and Code-Based Post-Quantum Cryptography: Constructions, Security, Cryptanalysis and Implementations",
+      "sections": 10,
+      "body_chars": 6547,
+      "cjk_chars": 146,
+      "references": 18,
+      "candidates": 0
+    },
+    "checks": {
+      "residual_internal_ids": [
+        "H-1645-1",
+        "H-8102-1"
+      ],
+      "dangling_citations": [],
+      "system_terms": [],
+      "placeholders": [],
+      "duplicate_dois": [],
+      "references": 18,
+      "citation_marks_in_body": 71,
+      "cjk_chars": 146,
+      "clean": false
+    }
+  }
+]
