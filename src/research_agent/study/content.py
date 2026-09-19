@@ -230,9 +230,9 @@ EXPAND_PROMPT = """你是科研内容形成节点的"候选深化"步骤。
 
 必须为每个候选补全：
 1. satisfies_constraints：逐条回应 design_contract 的硬约束（每条给 satisfied + reason）；
-2. risks：至少 2 条具体风险（条件兼容性/选择性/副反应/放大）；
-3. validation_plan：最小验证实验（底物、条件范围、判据、成功的判定标准）；
-4. rationale：为什么该算子链在化学上可能成立；
+2. risks：至少 2 条具体风险（条件兼容性/路径选择/副作用/规模化）；
+3. validation_plan：最小验证方案（对象、条件范围、判据、成功的判定标准）；
+4. rationale：为什么该算子链在该领域机制上可能成立；
 5. novelty_source：相对已有方案的机制差异（不得写成"换底物/换催化剂"）。
 
 design_contract:

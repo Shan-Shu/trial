@@ -449,13 +449,13 @@ CONSUMER_PROMPT = """你是科研知识消费节点。数据库查询、证据�
     "mechanism_states": [
       {{
         "state_id": "MS-0001",
-        "start_state": "起始底物/起始态",
-        "activation_mode": "活化方式",
-        "intermediate": "关键中间体",
-        "bond_changes": ["C-N formation", "C-C cleavage"],
-        "selectivity_control": "区域/立体选择性来源",
-        "catalyst_cycle": "催化循环或价态变化",
-        "termination": "终止步骤",
+        "start_state": "起始状态（领域相关：起始物/输入，或初始配置）",
+        "activation_mode": "触发/活化方式",
+        "intermediate": "关键中间态",
+        "bond_changes": ["结构或状态变化（领域相关：键生成/断裂、状态迁移等）"],
+        "selectivity_control": "选择性/路径选择的来源",
+        "catalyst_cycle": "循环过程（领域相关：催化循环、迭代解码或归约循环）",
+        "termination": "终止/收敛步骤",
         "known_side_reactions": [],
         "evidence_ids": ["E-0001-1"],
         "hyperedge_ids": ["H-0001"],
@@ -463,7 +463,7 @@ CONSUMER_PROMPT = """你是科研知识消费节点。数据库查询、证据�
       }}
     ],
     "reaction_primitives": [
-      {{"op_id": "OP-0001", "name": "反应原语名称", "input_state": "输入",
+      {{"op_id": "OP-0001", "name": "领域原语名称", "input_state": "输入",
         "output_state": "输出", "evidence_ids": [], "hyperedge_ids": []}}
     ],
     "opportunity_gaps": [
@@ -475,7 +475,7 @@ CONSUMER_PROMPT = """你是科研知识消费节点。数据库查询、证据�
     ],
     "operator_candidates": [
       {{"op_id": "OP-0001", "name": "算子名（取自词表）",
-        "operator_chain": [{{"operator": "polarity_reversal",
+        "operator_chain": [{{"operator": "算子名（取自算子词表）",
                             "input": "输入态", "output": "输出态"}}],
         "target": "该算子链针对的目标对象",
         "evidence_ids": [], "hyperedge_ids": []}}
@@ -907,7 +907,7 @@ def _opportunity_gaps(items: list[dict[str, Any]],
         if wants_multi_nitrogen and not _mentions_multi_nitrogen(state):
             missing = "目标要求多氮骨架，但已抽取机制均只涉及单个氮引入步骤"
         if state.get("intermediate") and not state.get("termination"):
-            missing = missing or "缺少终止步骤与副反应信息，难以判断该中间体能否被定向捕获"
+            missing = missing or "缺少终止/收敛步骤与已知风险信息，难以判断该中间态能否被定向构造"
         out.append({
             "gap_id": f"GAP-{len(out) + 1:04d}",
             "gap_type": "mechanism_target_gap" if missing else "selectivity_unresolved",
@@ -933,7 +933,7 @@ def _opportunity_gaps(items: list[dict[str, Any]],
             "gap_type": "condition_conflict",
             "known_mechanism": state.get("label") or "",
             "unmet_target": objective,
-            "missing_link": "关键中间体的条件窗口（温度/溶剂/当量）未结构化，无法核对兼容性",
+            "missing_link": "关键中间态的参数窗口（条件与量纲）未结构化，无法核对兼容性",
             "risk": "条件不兼容可能导致候选方案不可执行",
             "evidence_ids": list(state.get("evidence_ids") or [])[:4],
             "hyperedge_ids": list(state.get("hyperedge_ids") or [])[:4],
@@ -983,7 +983,7 @@ def _operator_candidates(states: list[dict[str, Any]],
             break
     if out:
         return out
-    # 退化：用反应原语给出单算子链，保证字段非空且可校验
+    # 退化：用领域原语给出单算子链，保证字段非空且可校验
     for primitive in primitives[:limit]:
         chain, validation = normalize_operator_chain([{
             "operator": primitive.get("name") or "unclassified_transform",
@@ -1053,8 +1053,8 @@ def _constraint_conflicts(states: list[dict[str, Any]],
         if not mech or not cond_missing:
             continue
         out.append({
-            "constraint": "需要可执行的反应条件",
-            "conflict": f"「{label[:60]}」缺少结构化条件（温度/溶剂/当量），无法核对硬约束",
+            "constraint": "需要可执行的领域条件",
+            "conflict": f"「{label[:60]}」缺少结构化条件（参数与量纲），无法核对硬约束",
             "evidence_ids": list(h.get("evidence_ids") or [])[:4],
             "hyperedge_ids": [h.get("reference_id")] if h.get("reference_id") else [],
         })
