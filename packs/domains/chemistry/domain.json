@@ -59,6 +59,48 @@
       "enables"
     ]
   },
+  "extraction_schema": {
+    "condition_keys": [
+      {"key": "temperature", "label": "温度", "unit": "°C"},
+      {"key": "duration", "label": "时长", "unit": "h/min"},
+      {"key": "solvent", "label": "溶剂", "unit": null},
+      {"key": "catalyst", "label": "催化剂", "unit": null},
+      {"key": "ligand", "label": "配体", "unit": null},
+      {"key": "additive", "label": "添加剂", "unit": null},
+      {"key": "base", "label": "碱", "unit": null},
+      {"key": "atmosphere", "label": "气氛", "unit": null},
+      {"key": "equivalent", "label": "当量", "unit": "equiv"},
+      {"key": "mol%", "label": "催化剂/试剂用量", "unit": "mol%"},
+      {"key": "concentration", "label": "浓度", "unit": "M"},
+      {"key": "pH", "label": "pH", "unit": null},
+      {"key": "pressure", "label": "压力", "unit": "bar/MPa"},
+      {"key": "setting", "label": "装置/操作设定", "unit": null}
+    ],
+    "measurement_metrics": [
+      {"metric": "yield", "label": "产率", "unit": "%"},
+      {"metric": "ee", "label": "对映过量", "unit": "%"},
+      {"metric": "dr", "label": "非对映比", "unit": null},
+      {"metric": "conversion", "label": "转化率", "unit": "%"},
+      {"metric": "purity", "label": "纯度", "unit": "%"},
+      {"metric": "TON", "label": "转换数", "unit": null},
+      {"metric": "selectivity", "label": "选择性", "unit": "%"}
+    ],
+    "quantitative_examples": [
+      "80 °C", "12 h", "5 mol% Pd(PPh3)4", "2.0 equiv Cs2CO3", "toluene",
+      "under argon", "收率 87%", "ee 94%", "dr > 20:1"
+    ],
+    "quantitative_rules": [
+      {
+        "applies_to_hyperedge_types": ["procedure", "causal_relation", "observation"],
+        "require": "conditions",
+        "text": "化学/材料/实验类超边（procedure、causal_relation、observation）必须给出 conditions：temperature(°C)、duration(h/min)、solvent、catalyst、ligand、additive、base、atmosphere、equivalent、mol%、concentration、pH、pressure、setting；有产率/选择性数字时必须给出 measurements（yield/ee/dr/conversion/purity）。"
+      }
+    ],
+    "hyperedge_quota": {
+      "mechanism": 40,
+      "reaction": 40
+    }
+  },
   "extra_seed_node_types": [
     [
       "Reaction",

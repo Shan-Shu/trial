@@ -1,0 +1,40 @@
+{"term": "hqc", "id": "cbc:scheme/hqc", "canonical": "HQC", "aliases": ["Hamming Quasi-Cyclic", "HQC-KEM", "Hamming Quasi-Cyclic KEM"], "source": "local:code-based-crypto"}
+{"term": "bike", "id": "cbc:scheme/bike", "canonical": "BIKE", "aliases": ["Bit Flipping Key Encapsulation", "BIKE-KEM"], "source": "local:code-based-crypto"}
+{"term": "classic mceliece", "id": "cbc:scheme/classic-mceliece", "canonical": "Classic McEliece", "aliases": ["McEliece KEM", "Classic-McEliece"], "source": "local:code-based-crypto"}
+{"term": "mceliece cryptosystem", "id": "cbc:scheme/mceliece", "canonical": "McEliece cryptosystem", "aliases": ["McEliece PKE", "McEliece encryption"], "source": "local:code-based-crypto"}
+{"term": "niederreiter cryptosystem", "id": "cbc:scheme/niederreiter", "canonical": "Niederreiter cryptosystem", "aliases": ["Niederreiter PKE"], "source": "local:code-based-crypto"}
+{"term": "ledacrypt", "id": "cbc:scheme/ledacrypt", "canonical": "LEDAcrypt", "aliases": ["LEDAkem", "LEDApkc"], "source": "local:code-based-crypto"}
+{"term": "qc-mdpc", "id": "cbc:code/qc-mdpc", "canonical": "QC-MDPC code", "aliases": ["quasi-cyclic moderate-density parity-check code", "QC-MDPC"], "source": "local:code-based-crypto"}
+{"term": "qc-ldpc", "id": "cbc:code/qc-ldpc", "canonical": "QC-LDPC code", "aliases": ["quasi-cyclic low-density parity-check code"], "source": "local:code-based-crypto"}
+{"term": "goppa code", "id": "cbc:code/goppa", "canonical": "Goppa code", "aliases": ["binary Goppa code", "classical Goppa code"], "source": "local:code-based-crypto"}
+{"term": "reed-muller code", "id": "cbc:code/reed-muller", "canonical": "Reed-Muller code", "aliases": ["RM code", "Reed Muller code"], "source": "local:code-based-crypto"}
+{"term": "reed-solomon code", "id": "cbc:code/reed-solomon", "canonical": "Reed-Solomon code", "aliases": ["RS code"], "source": "local:code-based-crypto"}
+{"term": "ldpc code", "id": "cbc:code/ldpc", "canonical": "LDPC code", "aliases": ["low-density parity-check code"], "source": "local:code-based-crypto"}
+{"term": "mds code", "id": "cbc:code/mds", "canonical": "MDS code", "aliases": ["maximum distance separable code"], "source": "local:code-based-crypto"}
+{"term": "syndrome decoding problem", "id": "cbc:problem/sdp", "canonical": "syndrome decoding problem", "aliases": ["SDP", "decoding problem", "random linear code decoding"], "source": "local:code-based-crypto"}
+{"term": "quasi-cyclic syndrome decoding", "id": "cbc:problem/qcsd", "canonical": "quasi-cyclic syndrome decoding problem", "aliases": ["QC-SD", "2-QCSD"], "source": "local:code-based-crypto"}
+{"term": "learning parity with noise", "id": "cbc:problem/lpn", "canonical": "learning parity with noise", "aliases": ["LPN"], "source": "local:code-based-crypto"}
+{"term": "information set decoding", "id": "cbc:attack/isd", "canonical": "information set decoding", "aliases": ["ISD"], "source": "local:code-based-crypto"}
+{"term": "prange algorithm", "id": "cbc:attack/prange", "canonical": "Prange algorithm", "aliases": ["Prange's ISD", "Prange 1962"], "source": "local:code-based-crypto"}
+{"term": "stern algorithm", "id": "cbc:attack/stern", "canonical": "Stern algorithm", "aliases": ["Stern's ISD", "Stern 1989"], "source": "local:code-based-crypto"}
+{"term": "dumer algorithm", "id": "cbc:attack/dumer", "canonical": "Dumer algorithm", "aliases": ["Dumer's ISD"], "source": "local:code-based-crypto"}
+{"term": "bjmm algorithm", "id": "cbc:attack/bjmm", "canonical": "BJMM algorithm", "aliases": ["Becker-Joux-May-Meurer", "BJMM"], "source": "local:code-based-crypto"}
+{"term": "may-ozerov algorithm", "id": "cbc:attack/may-ozerov", "canonical": "May-Ozerov algorithm", "aliases": ["May-Ozerov near neighbor", "MMT"], "source": "local:code-based-crypto"}
+{"term": "reaction attack", "id": "cbc:attack/reaction", "canonical": "reaction attack", "aliases": ["decryption failure attack", "GJS attack"], "source": "local:code-based-crypto"}
+{"term": "key recovery attack", "id": "cbc:attack/key-recovery", "canonical": "key recovery attack", "aliases": ["secret key recovery"], "source": "local:code-based-crypto"}
+{"term": "bit-flipping decoder", "id": "cbc:decoder/bit-flipping", "canonical": "bit-flipping decoder", "aliases": ["BF decoder", "black-gray decoder", "Black-Gray BF"], "source": "local:code-based-crypto"}
+{"term": "belief propagation decoder", "id": "cbc:decoder/belief-propagation", "canonical": "belief propagation decoder", "aliases": ["BP decoder", "BP+OSD"], "source": "local:code-based-crypto"}
+{"term": "ordered statistics decoding", "id": "cbc:decoder/osd", "canonical": "ordered statistics decoding", "aliases": ["OSD"], "source": "local:code-based-crypto"}
+{"term": "patterson decoding", "id": "cbc:decoder/patterson", "canonical": "Patterson decoding", "aliases": ["Patterson algorithm", "algebraic Goppa decoding"], "source": "local:code-based-crypto"}
+{"term": "fujisaki-okamoto transform", "id": "cbc:transform/fo", "canonical": "Fujisaki-Okamoto transform", "aliases": ["FO transform", "FO", "implicit rejection transform"], "source": "local:code-based-crypto"}
+{"term": "decoding failure rate", "id": "cbc:metric/dfr", "canonical": "decoding failure rate", "aliases": ["DFR", "decryption failure rate"], "source": "local:code-based-crypto"}
+{"term": "work factor", "id": "cbc:metric/work-factor", "canonical": "work factor", "aliases": ["attack complexity", "bit security"], "source": "local:code-based-crypto"}
+{"term": "nist security category", "id": "cbc:level/nist-category", "canonical": "NIST security category", "aliases": ["security level 1", "security level 3", "security level 5", "NIST category"], "source": "local:code-based-crypto"}
+{"term": "nist pqc standardization", "id": "cbc:standard/nist-pqc", "canonical": "NIST PQC standardization", "aliases": ["NIST post-quantum cryptography standardization", "PQC standardization", "NIST PQC"], "source": "local:code-based-crypto"}
+{"term": "constant-time implementation", "id": "cbc:impl/constant-time", "canonical": "constant-time implementation", "aliases": ["constant time", "ct implementation"], "source": "local:code-based-crypto"}
+{"term": "side-channel attack", "id": "cbc:attack/side-channel", "canonical": "side-channel attack", "aliases": ["timing attack", "power analysis", "cache attack"], "source": "local:code-based-crypto"}
+{"term": "random oracle model", "id": "cbc:model/rom", "canonical": "random oracle model", "aliases": ["ROM"], "source": "local:code-based-crypto"}
+{"term": "quantum random oracle model", "id": "cbc:model/qrom", "canonical": "quantum random oracle model", "aliases": ["QROM"], "source": "local:code-based-crypto"}
+{"term": "ind-cca2 security", "id": "cbc:model/ind-cca2", "canonical": "IND-CCA2 security", "aliases": ["IND-CCA", "chosen-ciphertext security"], "source": "local:code-based-crypto"}
+{"term": "post-quantum cryptography", "id": "cbc:field/pqc", "canonical": "post-quantum cryptography", "aliases": ["PQC", "quantum-resistant cryptography", "后量子密码"], "source": "local:code-based-crypto"}
+{"term": "code-based cryptography", "id": "cbc:field/code-based", "canonical": "code-based cryptography", "aliases": ["coding-based cryptography", "编码密码"], "source": "local:code-based-crypto"}

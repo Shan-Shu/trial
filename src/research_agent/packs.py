@@ -235,6 +235,126 @@ def domain_terms(domain_kind: str) -> list[dict[str, Any]]:
     return _domain_vocab(domain_kind, "terms")
 
 
+# ------------------------------------------------------------- 抽取 schema
+
+SCHEMA_SKILL_ID = "extraction-schema"
+# 追加语义：类型体系是分类学，多领域叠加不会互相污染
+_SCHEMA_ADD_FIELDS = ("entity_types", "hyperedge_types", "member_roles",
+                      "event_types")
+# 覆盖语义：量纲/指标/示例/强制规则是学科专属的，继承别的学科会污染抽取
+_SCHEMA_OVERRIDE_FIELDS = ("condition_keys", "measurement_metrics",
+                           "quantitative_examples", "quantitative_rules")
+
+
+def _as_key_rows(value: Any) -> list[dict[str, Any]]:
+    """把 ``condition_keys``/``measurement_metrics`` 归一成 dict 列表。
+
+    兼容三种写法：``"n"``、``{"key": "n", "unit": "bits"}``、
+    ``{"metric": "dfr", "unit": "log2"}``。
+    """
+    rows: list[dict[str, Any]] = []
+    for item in value or []:
+        if isinstance(item, str):
+            name = item.strip()
+            if name:
+                rows.append({"key": name, "metric": name, "label": name,
+                             "unit": None})
+        elif isinstance(item, dict):
+            name = str(item.get("key") or item.get("metric") or "").strip()
+            if not name:
+                continue
+            rows.append({
+                "key": name, "metric": name,
+                "label": str(item.get("label") or name),
+                "unit": item.get("unit"),
+            })
+    return rows
+
+
+def _dedup_by(rows: list[Any], field: str) -> list[Any]:
+    seen: set[str] = set()
+    out: list[Any] = []
+    for row in rows:
+        if isinstance(row, dict):
+            key = str(row.get(field) or "").strip().lower()
+        else:
+            key = str(row).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def extraction_schema(domain_kind: str = "") -> dict[str, Any]:
+    """返回某领域的抽取 schema：基础技能包 + 领域包 ``extraction_schema``。
+
+    合并语义（见 ``packs/skills/extraction-schema/SKILL.md``）：
+
+    - ``entity_types`` / ``hyperedge_types`` / ``member_roles`` / ``event_types``
+      **追加**（按类型名去重，领域新增类型排在后面）；
+    - ``condition_keys`` / ``measurement_metrics`` / ``quantitative_examples`` /
+      ``quantitative_rules`` **领域声明即整体覆盖**——量纲属于学科，继承别的
+      学科的词表会污染抽取；
+    - ``hyperedge_quota`` 按 key 合并（领域同名键覆盖基础层）。
+
+    缺失基础技能包时告警并返回空结构（调用方自行降级），不做静默兜底。
+    """
+    base = skill_data(SCHEMA_SKILL_ID)
+    if not base:
+        warn_once("extraction-schema-missing",
+                  "未找到技能包 %s（抽取 schema 将为空；请检查 "
+                  "packs/skills/ 或 RA_PACKS_DIR）", SCHEMA_SKILL_ID)
+    out: dict[str, Any] = {}
+    for field in _SCHEMA_ADD_FIELDS:
+        out[field] = list(base.get(field) or [])
+    for field in _SCHEMA_OVERRIDE_FIELDS:
+        out[field] = base.get(field) or []
+    out["hyperedge_quota"] = dict(base.get("hyperedge_quota") or {})
+
+    domain = domain_data(domain_kind) if domain_kind else {}
+    schema = domain.get("extraction_schema")
+    if not isinstance(schema, dict):
+        return out
+    for field in _SCHEMA_ADD_FIELDS:
+        extra = schema.get(field)
+        if not extra:
+            continue
+        merged = list(out[field])
+        if field == "hyperedge_types":
+            merged.extend(x for x in extra if isinstance(x, dict))
+            out[field] = _dedup_by(merged, "type")
+        else:
+            merged.extend(extra)
+            out[field] = _dedup_by(merged, "name")
+    for field in _SCHEMA_OVERRIDE_FIELDS:
+        extra = schema.get(field)
+        if extra:
+            out[field] = extra
+    quota = schema.get("hyperedge_quota")
+    if isinstance(quota, dict):
+        for key, value in quota.items():
+            try:
+                out["hyperedge_quota"][str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+    out["entity_types"] = _dedup_by(
+        [str(x) for x in out["entity_types"] if str(x).strip()], "name")
+    out["member_roles"] = _dedup_by(
+        [str(x) for x in out["member_roles"] if str(x).strip()], "name")
+    out["event_types"] = _dedup_by(
+        [str(x) for x in out["event_types"] if str(x).strip()], "name")
+    out["condition_keys"] = _as_key_rows(out["condition_keys"])
+    out["measurement_metrics"] = _as_key_rows(out["measurement_metrics"])
+    out["domain_kind"] = domain_kind or ""
+    return out
+
+
+def hyperedge_quota(domain_kind: str = "") -> dict[str, int]:
+    """消费节点的超边检索配额：基础技能包 + 领域包 ``hyperedge_quota``。"""
+    return dict(extraction_schema(domain_kind).get("hyperedge_quota") or {})
+
+
 def _domain_vocab(domain_kind: str, name: str) -> list[dict[str, Any]]:
     key = (f"domain-{name}", domain_kind)
     if key in _cache:

@@ -52,5 +52,40 @@
       "part_of",
       "improves_upon"
     ]
+  },
+  "extraction_schema": {
+    "condition_keys": [
+      {"key": "dose", "label": "剂量", "unit": "mg/kg"},
+      {"key": "duration", "label": "疗程/时长", "unit": "day/week"},
+      {"key": "route", "label": "给药途径", "unit": null},
+      {"key": "sample_size", "label": "样本量", "unit": "n"},
+      {"key": "model", "label": "模型（细胞/动物）", "unit": null},
+      {"key": "cell_line", "label": "细胞系", "unit": null},
+      {"key": "concentration", "label": "浓度", "unit": "µM/nM"},
+      {"key": "timepoint", "label": "时间点", "unit": "h/day"},
+      {"key": "age", "label": "年龄/周龄", "unit": "week"}
+    ],
+    "measurement_metrics": [
+      {"metric": "effect_size", "label": "效应量", "unit": null},
+      {"metric": "p_value", "label": "p 值", "unit": null},
+      {"metric": "confidence_interval", "label": "置信区间", "unit": null},
+      {"metric": "accuracy", "label": "准确率", "unit": "%"},
+      {"metric": "sensitivity", "label": "灵敏度", "unit": "%"},
+      {"metric": "specificity", "label": "特异度", "unit": "%"},
+      {"metric": "hazard_ratio", "label": "风险比", "unit": null},
+      {"metric": "expression_fold", "label": "表达倍数", "unit": "fold"},
+      {"metric": "frequency", "label": "发生率", "unit": "%"}
+    ],
+    "quantitative_examples": [
+      "dose 10 mg/kg", "p < 0.01", "n = 120", "HR 0.72 (95% CI 0.6-0.9)",
+      "IC50 12 µM", "表达上调 2.4 倍"
+    ],
+    "quantitative_rules": [
+      {
+        "applies_to_hyperedge_types": ["observation", "comparison", "claim", "causal_relation"],
+        "require": "measurements",
+        "text": "生物医学类超边必须给出 measurements：effect_size、p_value、confidence_interval、accuracy、sensitivity、specificity、hazard_ratio、expression_fold、frequency；并给出 conditions：dose、duration、route、model、cell_line、sample_size。"
+      }
+    ]
   }
 }

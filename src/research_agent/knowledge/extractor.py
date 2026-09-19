@@ -12,6 +12,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from research_agent import packs
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,16 +71,16 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
   ],
   "hyperedges": [
     {
-      "type": "observation|claim|procedure|causal_relation|comparison|definition|chronology|argument",
+      "type": "__HYPEREDGE_TYPE_ENUM__",
       "label": "该超边的简短名称；不要创建 Reaction/Event 节点",
       "members": [
         {"name": "entities 中的实体名", "role": "跨学科通用角色或领域角色", "qualifiers": {}}
       ],
       "conditions": [
-        {"key": "temperature|duration|dose|setting|period|location|...", "operator": "=|>|<|between|described_as", "value": "值", "unit": "单位或 null"}
+        {"key": "__CONDITION_KEY_HINT__", "operator": "=|>|<|between|described_as", "value": "值", "unit": "单位或 null"}
       ],
       "measurements": [
-        {"metric": "yield|effect_size|p_value|accuracy|frequency|...", "value": "值", "unit": "单位或 null", "qualifier": "可选"}
+        {"metric": "__MEASUREMENT_METRIC_HINT__", "value": "值", "unit": "单位或 null", "qualifier": "可选"}
       ],
       "confidence": 0.0,
       "evidence": "支撑原句（可截断，≤300字符）"
@@ -87,13 +89,13 @@ SCHEMA_HINT = """请严格输出一个 JSON 对象（不要输出其它文字、
 }
 
 实体类型建议列表（优先选择，若都不匹配再自造）：
-Method, Material, Device, Drug, Disease, Model, Metric, Dataset, Task, Theory,
-Parameter, Property, Application, Organism, CellLine, Chemical, Target,
-BiologicalProcess, Technology, Tool, Standard, Regulation, Institution, Researcher
+__ENTITY_TYPES__
 
-超边通用角色建议：agent, patient, target, instrument, medium, context,
-moderator, mediator, outcome, comparison, location, time, evidence。
+超边通用角色建议：__MEMBER_ROLES__。
 领域可用更精确角色，但角色只存在于超边成员中，不要把角色本身建成实体节点。
+
+领域超边形式（来自领域包；成员角色与 conditions/measurements 键按此填写）：
+__HYPEREDGE_FORMS__
 
 硬性要求：
 1. 连通性：每条 relation 的 subject 和 object，以及每个 event 的 participants，
@@ -132,20 +134,14 @@ moderator, mediator, outcome, comparison, location, time, evidence。
     仅在确有参与关系时给出；不要把同句共现的无关概念全部拉成 participants，
     避免 involves 变成笼统的“共现”关系。
 13. conditions / measurements 必须真的填写，不允许留空数组：只要原文出现任何可量化的
-    做法、配方、参数或结果，就必须落到 conditions 或 measurements 里。
-    - 化学/材料/实验类超边（procedure、causal_relation、observation）
-      必须给出 conditions：temperature(°C)、duration(h/min)、solvent、catalyst、
-      ligand、additive、base、atmosphere、equivalent、mol%、concentration、pH、
-      pressure、setting；有产率/选择性/性能数字时必须给出 measurements。
-    - 评测/社科/生物医学类超边必须给出 measurements：accuracy、effect_size、p_value、
-      frequency、score、sample_size、coverage、period 等。
+    设定、参数、过程或结果，就必须落到 conditions 或 measurements 里。
+__QUANT_RULES__
     - conditions 用 {"key","operator","value","unit"}：key 用上面的标准键；
       operator 用 = / > / < / between / described_as；
-      value 写原文数值或名称（如 "80" 或 "toluene"），unit 写单位或 null。
+      value 写原文数值或名称，unit 写单位或 null。
     - measurements 用 {"metric","value","unit","qualifier"}：value 写原文数值，
-      qualifier 可写测定条件（如 "isolated"、"NMR"、"per 100 g"）。
-    - 例子：80 °C、12 h、5 mol% Pd(PPh3)4、2.0 equiv Cs2CO3、toluene、under argon、
-      收率 87%、ee 94%、dr > 20:1、p < 0.01、n = 120。
+      qualifier 可写该数值的限定条件（如 "measured"、"reported"、"estimated"）。
+    - 例子：__QUANT_EXAMPLES__
     - 严禁把上面这些数字塞进 attributes 或不写；conditions/measurements 空着等于丢数据。"""
 
 
@@ -316,6 +312,78 @@ def _paper_header(meta: dict[str, Any] | None) -> str:
     )
 
 
+def _schema_placeholder_values(schema: dict[str, Any]) -> dict[str, str]:
+    """把抽取 schema（技能包 + 领域包）渲染成提示词占位符的取值。
+
+    领域内容一律来自 pack：代码只负责排版，不内联任何学科词表。
+    """
+    entity_types = [str(x) for x in schema.get("entity_types") or []]
+    hyperedges = [h for h in schema.get("hyperedge_types") or []
+                  if isinstance(h, dict)]
+    member_roles = [str(x) for x in schema.get("member_roles") or []]
+    condition_keys = [c for c in schema.get("condition_keys") or []
+                      if isinstance(c, dict)]
+    metrics = [m for m in schema.get("measurement_metrics") or []
+               if isinstance(m, dict)]
+
+    def _unit_hint(row: dict[str, Any]) -> str:
+        unit = row.get("unit")
+        return f"({unit})" if unit else ""
+
+    type_enum = "|".join(str(h.get("type")) for h in hyperedges if h.get("type"))
+    cond_hint = "|".join(
+        f"{c.get('key')}{_unit_hint(c)}" for c in condition_keys[:14]) or "..."
+    metric_hint = "|".join(
+        f"{m.get('metric')}{_unit_hint(m)}" for m in metrics[:14]) or "..."
+
+    form_lines: list[str] = []
+    for h in hyperedges:
+        htype = str(h.get("type") or "").strip()
+        if not htype:
+            continue
+        label = str(h.get("label") or "").strip()
+        roles = [str(x) for x in h.get("roles") or h.get("member_roles") or []]
+        conds = [str(x) for x in h.get("condition_keys") or []]
+        meas = [str(x) for x in h.get("measurement_metrics") or []]
+        detail = []
+        if roles:
+            detail.append("成员角色 " + "/".join(roles))
+        if conds:
+            detail.append("conditions 键 " + "、".join(conds))
+        if meas:
+            detail.append("measurements 指标 " + "、".join(meas))
+        suffix = ("：" + "；".join(detail)) if detail else ""
+        form_lines.append(f"- {htype}" + (f"（{label}）" if label else "") + suffix)
+
+    examples = [str(x) for x in schema.get("quantitative_examples") or []]
+    quant_lines: list[str] = []
+    for rule in schema.get("quantitative_rules") or []:
+        if isinstance(rule, dict) and str(rule.get("text") or "").strip():
+            quant_lines.append("    - " + str(rule["text"]).strip())
+        elif isinstance(rule, str) and rule.strip():
+            quant_lines.append("    - " + rule.strip())
+
+    return {
+        "__ENTITY_TYPES__": ", ".join(entity_types) or "（未配置类型表）",
+        "__HYPEREDGE_TYPE_ENUM__": type_enum or "observation|claim",
+        "__CONDITION_KEY_HINT__": cond_hint,
+        "__MEASUREMENT_METRIC_HINT__": metric_hint,
+        "__MEMBER_ROLES__": "、".join(member_roles) or "（未配置角色表）",
+        "__HYPEREDGE_FORMS__": ("\n".join(form_lines)
+                                if form_lines else "（领域包未声明超边形式）"),
+        "__QUANT_RULES__": ("\n".join(quant_lines)
+                            if quant_lines else "    - 按原文出现的量纲填写。"),
+        "__QUANT_EXAMPLES__": "、".join(examples) or "（无）",
+    }
+
+
+def _render_schema_hint(schema: dict[str, Any]) -> str:
+    text = SCHEMA_HINT
+    for token, value in _schema_placeholder_values(schema).items():
+        text = text.replace(token, value)
+    return text
+
+
 def _domain_profile_hint(domain_profile: dict[str, Any] | None) -> str | None:
     if not domain_profile:
         return None
@@ -347,9 +415,10 @@ def build_prompt(paragraphs: list[str], paper_meta: dict[str, Any] | None = None
                  domain_profile: dict[str, Any] | None = None) -> str:
     header = _paper_header(paper_meta)
     text = "\n\n".join(paragraphs)
-    parts = [SYSTEM_HINT, SCHEMA_HINT, ATTRIBUTE_HINT, RELATION_VOCAB,
-             ERROR_LIST_HINT,
-             SELF_CHECK_HINT, header]
+    kind = str((domain_profile or {}).get("domain_kind") or "").strip()
+    schema = packs.extraction_schema(kind)
+    parts = [SYSTEM_HINT, _render_schema_hint(schema), ATTRIBUTE_HINT,
+             RELATION_VOCAB, ERROR_LIST_HINT, SELF_CHECK_HINT, header]
     if existing_entities:
         parts.append(
             "库中已有（尽量复用的）规范实体（Type: Name）：\n"

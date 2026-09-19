@@ -3,6 +3,7 @@
 - 基础词表（技能包）：机制关键词、条件关键词、触发式规则、算子关键词等；
 - 领域增补（`packs/domains/<kind>/vocab/mechanism.jsonl`）：按 ``section`` 追加条目，
   每行形如 ``{"section": "intermediate_rules", "name": "...", "keywords": [...]}``；
+  带 ``"mode": "replace"`` 时该 section 先清空再写入（学科专用词表不与其他学科相加）；
 - 合并结果按领域缓存；领域为空时**显式告警**并返回基础词表，不做静默兜底。
 """
 from __future__ import annotations
@@ -65,15 +66,28 @@ def mechanism_lexicon(domain_kind: str = "") -> dict[str, Any]:
         lex[name] = {str(k): [str(x) for x in (v or [])]
                      for k, v in (data.get(name) or {}).items()}
 
+    # 领域增补：默认追加；`"mode": "replace"` 表示该 section 先清空再写入
+    # （跨学科词表不能相加——化学的"溶剂/温度"出现在密码学提示词里会污染抽取）
+    replaced: set[str] = set()
     for row in _domain_rows(domain_kind):
         section = str(row.get("section") or "").strip()
+        replace = str(row.get("mode") or "").strip().lower() == "replace"
         if section in _LIST_SECTIONS:
+            if replace and section not in replaced:
+                lex[section] = []
+                replaced.add(section)
             lex[section].extend(str(x) for x in row.get("items") or [])
         elif section in _RULE_SECTIONS:
             rule = _as_rule([row.get("name"), row.get("keywords")])
             if rule:
+                if replace and section not in replaced:
+                    lex[section] = []
+                    replaced.add(section)
                 lex[section].append(rule)
         elif section in _DICT_SECTIONS:
+            if replace and section not in replaced:
+                lex[section] = {}
+                replaced.add(section)
             for k, v in (row.get("entries") or {}).items():
                 lex[section].setdefault(str(k), [])
                 lex[section][str(k)].extend(str(x) for x in v or [])

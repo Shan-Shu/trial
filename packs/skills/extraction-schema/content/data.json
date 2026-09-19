@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "note": "跨领域通用抽取 schema 默认值。领域包可在 domain.json 的 extraction_schema 中覆盖/追加；本文件不含任何单一学科的专用结论性内容。",
+  "entity_types": [
+    "Method", "Material", "Device", "Drug", "Disease", "Model", "Metric",
+    "Dataset", "Task", "Theory", "Parameter", "Property", "Application",
+    "Organism", "CellLine", "Chemical", "Target", "BiologicalProcess",
+    "Technology", "Tool", "Standard", "Regulation", "Institution", "Researcher",
+    "Algorithm", "Protocol", "ProofTechnique", "SecurityClaim", "Implementation",
+    "Platform", "Benchmark", "ParameterSet"
+  ],
+  "event_types": [
+    "Experiment", "Study", "Discovery", "ClinicalTrial", "Observation"
+  ],
+  "hyperedge_types": [
+    {"type": "observation", "label": "观察/测量结果", "member_roles": ["agent", "patient", "instrument", "outcome"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "claim", "label": "主张/结论", "member_roles": ["agent", "patient", "evidence"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "procedure", "label": "流程/步骤", "member_roles": ["agent", "patient", "instrument", "medium"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "causal_relation", "label": "因果关系", "member_roles": ["agent", "patient", "moderator", "mediator", "outcome"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "comparison", "label": "对比", "member_roles": ["comparison", "outcome", "context"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "definition", "label": "定义", "member_roles": ["patient", "context"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "chronology", "label": "时间线", "member_roles": ["agent", "patient", "time"], "condition_keys": [], "measurement_metrics": []},
+    {"type": "argument", "label": "论证", "member_roles": ["agent", "evidence", "outcome"], "condition_keys": [], "measurement_metrics": []}
+  ],
+  "member_roles": [
+    "agent", "patient", "target", "instrument", "medium", "context",
+    "moderator", "mediator", "outcome", "comparison", "location", "time",
+    "evidence"
+  ],
+  "condition_keys": [
+    {"key": "temperature", "label": "温度", "unit": "°C"},
+    {"key": "duration", "label": "时长", "unit": "h/min"},
+    {"key": "dose", "label": "剂量", "unit": null},
+    {"key": "setting", "label": "设定/配置", "unit": null},
+    {"key": "period", "label": "时段", "unit": null},
+    {"key": "location", "label": "地点", "unit": null},
+    {"key": "solvent", "label": "溶剂", "unit": null},
+    {"key": "catalyst", "label": "催化剂", "unit": null},
+    {"key": "atmosphere", "label": "气氛", "unit": null},
+    {"key": "concentration", "label": "浓度", "unit": "M/mM"},
+    {"key": "pH", "label": "pH", "unit": null},
+    {"key": "pressure", "label": "压力", "unit": "bar/MPa"}
+  ],
+  "measurement_metrics": [
+    {"metric": "yield", "label": "产率", "unit": "%"},
+    {"metric": "selectivity", "label": "选择性", "unit": "%"},
+    {"metric": "accuracy", "label": "准确率", "unit": "%"},
+    {"metric": "effect_size", "label": "效应量", "unit": null},
+    {"metric": "p_value", "label": "p 值", "unit": null},
+    {"metric": "frequency", "label": "频次", "unit": null},
+    {"metric": "score", "label": "评分", "unit": null},
+    {"metric": "sample_size", "label": "样本量", "unit": "n"},
+    {"metric": "coverage", "label": "覆盖率", "unit": "%"},
+    {"metric": "value", "label": "数值结果", "unit": null}
+  ],
+  "quantitative_examples": [
+    "80 °C", "12 h", "2.0 equiv", "1.0 M", "pH 7.4", "收率 87%",
+    "accuracy 92%", "p < 0.01", "n = 120"
+  ],
+  "quantitative_rules": [
+    {
+      "applies_to_hyperedge_types": ["procedure", "causal_relation", "observation"],
+      "require": "conditions",
+      "text": "实验/制备类超边（procedure、causal_relation、observation）必须给出 conditions：temperature(°C)、duration(h/min)、solvent、catalyst、atmosphere、equivalent、mol%、concentration、pH、pressure、setting；有产率/选择性/性能数字时必须给出 measurements。"
+    },
+    {
+      "applies_to_hyperedge_types": ["observation", "comparison", "claim"],
+      "require": "measurements",
+      "text": "评测/社科/生物医学类超边必须给出 measurements：accuracy、effect_size、p_value、frequency、score、sample_size、coverage、period 等。"
+    }
+  ],
+  "hyperedge_quota": {
+    "event": 120,
+    "relation": 30
+  }
+}

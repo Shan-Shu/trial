@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from langchain_core.messages import HumanMessage
 
+from research_agent import packs
 from research_agent.config import Settings, settings as default_settings
 from research_agent.db import connect
 from research_agent.domains import normalize_domain_profile
@@ -40,13 +41,20 @@ from research_agent.study.reaction_operators import (
 
 logger = logging.getLogger(__name__)
 
-# 超边类型配额：由代码控制的检索预算（与学科无关）
-DEFAULT_HYPEREDGE_QUOTA: dict[str, int] = {
-    "event": 120,
-    "relation": 30,
-    "mechanism": 40,
-    "reaction": 40,
-}
+# 超边类型检索配额：来自 packs/skills/extraction-schema + 领域包（不再写死在代码里）
+_DEFAULT_QUOTA_FALLBACK: dict[str, int] = {"event": 120, "relation": 30}
+
+
+def _default_hyperedge_quota(domain_kind: str = "") -> dict[str, int]:
+    """读取 packs 中的超边检索配额；包缺失时退回最小默认并告警。"""
+    quota = packs.hyperedge_quota(domain_kind)
+    if not quota:
+        return dict(_DEFAULT_QUOTA_FALLBACK)
+    merged = dict(_DEFAULT_QUOTA_FALLBACK)
+    merged.update({k: int(v) for k, v in quota.items() if v})
+    return merged
+
+
 HYPEREDGE_BRIEF_SCAN = 1500
 # evidence 归属文本字段；这些 key 里的字符串按“引用 ID”或“描述文本”区分处理。
 _ID_PREFIXES = ("P", "E", "H", "MS", "OP", "GAP", "OC", "FC")
@@ -123,8 +131,13 @@ def mine_ontology_evidence(conn: sqlite3.Connection,
                            limit_patterns: int = 200,
                            limit_evidence: int = 500,
                            hyperedge_quota: dict[str, int] | None = None,
-                           max_evidence_per_hyperedge: int = 3) -> dict[str, Any]:
-    """从 ontology_edges + hyperedges + provenance 构建可追溯知识包。"""
+                           max_evidence_per_hyperedge: int = 3,
+                           domain_kind: str = "") -> dict[str, Any]:
+    """从 ontology_edges + hyperedges + provenance 构建可追溯知识包。
+
+    ``domain_kind`` 决定机制词表与超边检索配额（均由 packs 提供，见 packs/skills/
+    extraction-schema）；为空时用通用层。
+    """
     ont.init_ontology(conn)
     summary = ont.graph_summary(conn)
     paper_count = conn.execute("SELECT COUNT(*) AS c FROM papers").fetchone()["c"]
@@ -206,7 +219,8 @@ def mine_ontology_evidence(conn: sqlite3.Connection,
 
     hyperedges = _select_hyperedges(conn, tokens, min_conf,
                                     hyperedge_quota=hyperedge_quota,
-                                    max_evidence=max_evidence_per_hyperedge)
+                                    max_evidence=max_evidence_per_hyperedge,
+                                    domain_kind=domain_kind)
     # 超边证据句同样进入 evidence 列表：否则模型引用 H-xxxx-n 会被误判为非法引用，
     # 机制状态也无法绑定超边级证据。
     for h in hyperedges:
@@ -265,16 +279,20 @@ def _select_hyperedges(conn: sqlite3.Connection,
                        min_confidence: float,
                        *,
                        hyperedge_quota: dict[str, int] | None = None,
-                       max_evidence: int = 3) -> list[dict[str, Any]]:
-    """按类型配额 + 相关性选出超边，再批量完整加载。"""
-    quota = dict(DEFAULT_HYPEREDGE_QUOTA)
+                       max_evidence: int = 3,
+                       domain_kind: str = "") -> list[dict[str, Any]]:
+    """按类型配额 + 相关性选出超边，再批量完整加载。
+
+    默认配额来自 packs（基础技能包 + 领域包），不再写死在代码里。
+    """
+    quota = _default_hyperedge_quota(domain_kind)
     if hyperedge_quota:
         quota.update({k: int(v) for k, v in hyperedge_quota.items() if v})
     briefs = ont.list_hyperedge_briefs(
         conn, min_confidence=min_confidence, limit=HYPEREDGE_BRIEF_SCAN)
     if not briefs:
         return []
-    lexicon = _lex()
+    lexicon = _lex(domain_kind)
     mechanism_keywords = tuple(lexicon["mechanism_keywords"])
     condition_keywords = tuple(lexicon["condition_keywords"])
     low_value_labels = set(lexicon["low_value_relation_labels"])
@@ -1219,7 +1237,10 @@ def make_knowledge_consumer_node(conn: sqlite3.Connection | None = None,
             log_study_event(
                 conn, settings, "knowledge_consumer", run_id, "running",
                 {"domain": plan.get("domain"), "mode": "llm" if model else "offline"})
-            bundle = mine_ontology_evidence(db, mission)
+            domain_kind = str(
+                (plan.get("domain_profile") or {}).get("domain_kind")
+                or plan.get("domain_kind") or "")
+            bundle = mine_ontology_evidence(db, mission, domain_kind=domain_kind)
             if not bundle["patterns"] and not bundle.get("hyperedges"):
                 retrieval_request = build_retrieval_request(plan)
                 log_study_event(
