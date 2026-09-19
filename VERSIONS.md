@@ -36,3 +36,7 @@ research-agent（LangGraph 多模型科研辅助 Agent）本地提交版本索�
 | v0.4.3 | fff12bf | JCR 分区导入（examples/import_jcr_xlsx.py，零依赖 xlsx 解析）+ 期刊匹配归一（大小写/连字符/副标题/冠词）；相关性低信号策略 C（有模型时 LLM 扩展，无模型时 warn 放行不静默丢弃）；.env 先于 settings 加载 |
 
 | v0.4.4 | working-tree | 外部静态评审 22 项（19 有效/3 无效）四批修复：事实核查引用白名单补全、人工复核不再清空 pdf/clean_text（upsert COALESCE 根因修复）、监控水位线先提交+ack/release、超边合并重指向成员与测量、dotenv 顺序、领域相关性命中率与低信号策略、PDF 解析降级链路、按来源隔离检索错误、抽取失败显式标记、planner 解析失败不再伪成功、机制多氮判定去同义反复、引用归属两遍映射、中文分句与长段落切分、证据字符区间入 provenance、轮次快照节点、版本号与 VERSIONS/测试同步、超边条件去重与索引补全；测试 90→169 |
+
+| v0.4.5 | 26c6226 | 领域零硬编码续作：新增 `extraction-schema` 技能包（实体/事件/超边类型、成员角色、条件键、度量指标、量化强制规则、超边检索配额）与 `review-outline` 技能包（综述小节、中英切换、篇幅与术语策略）；新增领域包 `code_based_crypto`（HQC 为核心的基于编码密码学：节点分布 + 6 类超边形式 + 条件键与度量指标 + 机制/算子/术语词表 + 语料硬门 + 检索式）；抽取提示词、超边配额、综述结构与参考文献风格（ACS/IEEE）改由 pack 渲染；机制词表支持 `mode: replace`；测试 169→193 |
+
+| v0.4.6 | 129f68d | 领域语料工作流：`examples/run_domain_corpus.py`（多检索式抓取 + 语料硬门 + 并行质量/知识提取 + 断点续跑）、`examples/inspect_domain_corpus.py`（节点/超边/条件/度量抽查）、`examples/run_domain_review.py`（一次生成中文/中英/英文 IEEE 三版综述，内部编号转数字引用并落盘自检）；键名单位后缀归一、`normalize_domain_profile` 尊重包内 schema_status；测试 193→205 |
