@@ -93,5 +93,6 @@ def normalize_domain_profile(data: dict[str, Any] | None,
             profile.get("candidate_entity_types") or []),
         "candidate_relation_types": relation_types or list(
             profile.get("candidate_relation_types") or []),
-        "schema_status": str(raw.get("schema_status") or "candidate"),
+        "schema_status": str(raw.get("schema_status")
+                             or profile.get("schema_status") or "candidate"),
     }

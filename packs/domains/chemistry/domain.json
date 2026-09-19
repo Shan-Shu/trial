@@ -59,6 +59,33 @@
       "enables"
     ]
   },
+  "review_outline": {
+    "sections": [
+      "摘要",
+      "引言",
+      "结构特征与反应性",
+      "成环与环加成策略",
+      "催化体系与条件",
+      "区域与立体选择性",
+      "代表性骨架与应用",
+      "挑战与展望",
+      "结论"
+    ],
+    "sections_en": [
+      "Abstract",
+      "Introduction",
+      "Structural Features and Reactivity",
+      "Cyclization and Annulation Strategies",
+      "Catalytic Systems and Conditions",
+      "Regio- and Stereoselectivity",
+      "Representative Scaffolds and Applications",
+      "Challenges and Outlook",
+      "Conclusion"
+    ],
+    "terminology_note": "保留化学专有名词、催化剂与反应名称的英文原名。",
+    "section_min_chars": 200,
+    "review_target_chars": 4000
+  },
   "extraction_schema": {
     "condition_keys": [
       {"key": "temperature", "label": "温度", "unit": "°C"},

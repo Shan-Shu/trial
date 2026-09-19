@@ -179,6 +179,50 @@ def _acs_author(author: dict[str, Any]) -> str:
     return f"{family}, {initials}".strip().rstrip(",")
 
 
+def ieee_reference_line(paper: dict[str, Any], number: int) -> str:
+    """IEEE 期刊格式：[n] A. Author, B. Author, "Title," *Journal*, vol. V, no. N, pp. P, Year. DOI"""
+    authors = [_acs_author(a) for a in paper.get("authors") or []
+               if isinstance(a, dict)]
+    authors = [a for a in authors if a]
+    if len(authors) > 6:
+        author_text = ", ".join(authors[:6]) + ", et al."
+    else:
+        author_text = ", ".join(authors)
+    title = clean_text(paper.get("title") or "Untitled").rstrip(".")
+    venue = clean_text(paper.get("venue"))
+    year = clean_text(paper.get("pub_year")) or "n.d."
+    volume = clean_text(paper.get("volume"))
+    number_issue = clean_text(paper.get("issue") or paper.get("number"))
+    pages = clean_text(paper.get("pages"))
+    doi = re.sub(r"^https?://doi\.org/", "", clean_text(paper.get("doi")),
+                 flags=re.I)
+    parts: list[str] = []
+    if author_text:
+        parts.append(f"{author_text.rstrip('.')},")
+    parts.append(f'"{title},"')
+    if venue:
+        parts.append(f"*{venue}*,")
+    if volume:
+        parts.append(f"vol. {volume},")
+    if number_issue:
+        parts.append(f"no. {number_issue},")
+    if pages:
+        parts.append(f"pp. {pages},")
+    parts.append(f"{year}.")
+    line = f"[{number}] " + " ".join(parts)
+    if doi:
+        line += f" doi: {doi}."
+    return line
+
+
+def reference_line(paper: dict[str, Any], number: int,
+                   style: str = "acs") -> str:
+    """参考文献排版：``acs``（默认）或 ``ieee``。"""
+    if str(style or "acs").strip().lower() == "ieee":
+        return ieee_reference_line(paper, number)
+    return acs_reference_line(paper, number)
+
+
 def acs_reference_line(paper: dict[str, Any], number: int) -> str:
     """ACS 期刊格式：作者. 标题. *期刊* 年, 卷, 页. DOI"""
     authors = [_acs_author(a) for a in paper.get("authors") or []
@@ -267,7 +311,9 @@ def to_acs_document(draft: dict[str, Any],
                     subtitle: str = "",
                     header_notes: list[str] | None = None,
                     keep_candidate_section: bool = True,
-                    existing_citation_map: dict[str, Any] | None = None
+                    existing_citation_map: dict[str, Any] | None = None,
+                    reference_style: str = "acs",
+                    references_heading: str = "References"
                     ) -> dict[str, Any]:
     """把内容节点的结构化草稿转换为 ACS 纯净文稿。
 
@@ -370,7 +416,7 @@ def to_acs_document(draft: dict[str, Any],
         if not paper:
             references.append(f"({i}) [文献元数据缺失：{key}]")
             continue
-        references.append(acs_reference_line(paper, i))
+        references.append(reference_line(paper, i, reference_style))
 
     citation_map = {}
     for i, key in enumerate(order, start=1):
@@ -390,7 +436,7 @@ def to_acs_document(draft: dict[str, Any],
         header += ["", *[f"> {note}" for note in header_notes]]
     document = "\n".join(header + ["", "---", "", body])
     if references:
-        document += "\n\n## References\n\n" + "\n\n".join(references)
+        document += f"\n\n## {references_heading}\n\n" + "\n\n".join(references)
 
     residual_ids = sorted(set(_ANY_ID_RE.findall(document)))
     system_hits = [t for t in _SYSTEM_TERMS if t in document]

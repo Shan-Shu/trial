@@ -19,6 +19,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from research_agent import packs
 from research_agent.config import Settings, settings as default_settings
 from research_agent.retrieval.skills import (
     normalize_edge_gaps,
@@ -156,29 +157,63 @@ candidates JSON 结构（骨架级，字段保持精简）：
 REVIEW_BLOCK = """
 
 附加综述写作要求（任务性质 {task_kind}，必须满足）：
-1. 目标长度 {target_chars} 个中文字符（允许 ±15%），不要写成提纲或要点罗列。
-2. 必须使用下列小节标题，且每个小节都要有成段论述（每节不少于 200 字）：
-   ## 摘要
-   ## 引言
-   ## 结构特征与反应性
-   ## 成环与环加成策略
-   ## 催化体系与条件
-   ## 区域与立体选择性
-   ## 代表性骨架与应用
-   ## 挑战与展望
-   ## 结论
-3. sections 的每一项 text 必须是**完整段落**（3-6 句、150-400 字），
+1. 目标长度 {target_chars}{length_unit}（允许 ±15%），不要写成提纲或要点罗列。
+2. 必须使用下列小节标题，且每个小节都要有成段论述（每节不少于 {section_min_chars}{length_unit}）：
+{sections}
+3. sections 的每一项 text 必须是**完整段落**（3-6 句），
    不要把一句话拆成一条；同一小节用 2-3 个 items 覆盖不同侧面即可。
 4. 每条实质结论都要在 text 末尾带真实编号引用，格式为 [P-xxxx] / [E-xxxx] / [H-xxxx]，
    只能使用输入 knowledge 中真实存在的编号；无证据的推断必须明确写成
    “目前仅有间接证据”或“尚待验证”，不得编造文献。
-5. 摘要写成一段连贯文字（200-300 字），不要分点。
+5. {abstract_hint}
 6. 不要输出 candidates 数组（本任务不是生成新方法）。
-7. 语言：中文；保留化学专有名词、催化剂与反应名称的英文原名。
+7. 语言：{language_name}；{terminology_note}
 """
 
-REVISION_BLOCK = """
 
+def detect_writeup_language(request: str, plan: dict[str, Any] | None = None) -> str:
+    """判定写作语言：显式配置 > 请求中的语言指令 > 中文默认。"""
+    plan = plan or {}
+    explicit = str(plan.get("writeup_language") or "").strip().lower()
+    if explicit.startswith("en"):
+        return "en"
+    if explicit.startswith("zh"):
+        return "zh"
+    text = str(request or "").lower()
+    english_markers = ("in english", "write in english", "english version",
+                       "ieee style", "acm style", "用英文", "英文撰写", "英文版")
+    if any(marker in text for marker in english_markers):
+        return "en"
+    return "zh"
+
+
+def render_review_block(plan: dict[str, Any] | None,
+                        target_chars: int,
+                        request: str = "") -> str:
+    """按领域包的 review_outline 渲染综述写作要求（结构来自 pack，不写死在代码里）。"""
+    plan = plan or {}
+    profile = plan.get("domain_profile") or {}
+    domain_kind = str(profile.get("domain_kind") or plan.get("domain_kind") or "")
+    language = detect_writeup_language(request, plan)
+    outline = packs.review_outline(domain_kind, language)
+    sections = [str(x) for x in outline.get("sections") or []]
+    is_en = language == "en"
+    bullets = "\n".join(f"   ## {s}" for s in sections) or "   ## 摘要\n   ## 结论"
+    return (REVIEW_BLOCK
+            .replace("{task_kind}", clean_str(plan.get("task_kind"), "summary"))
+            .replace("{length_unit}", " words" if is_en else " 个中文字符")
+            .replace("{target_chars}", str(target_chars))
+            .replace("{section_min_chars}",
+                     str(int(outline.get("section_min_chars") or 200)))
+            .replace("{sections}", bullets)
+            .replace("{abstract_hint}",
+                     str(outline.get("abstract_hint")
+                         or "摘要写成一段连贯文字，不要分点。"))
+            .replace("{language_name}", "English" if is_en else "中文")
+            .replace("{terminology_note}",
+                     str(outline.get("terminology_note") or "")))
+
+REVISION_BLOCK = """
 上一轮审核未通过，必须逐条处理下列修订意见（revision_actions）：
 {revision_actions}
 
@@ -1063,13 +1098,12 @@ def make_content_node(model=None,
                     "{revision_actions}",
                     json.dumps(revision_actions, ensure_ascii=False, indent=2))
             elif plan.get("task_kind") != "generative":
-                # 综述/前沿类任务：给出小节结构、段落粒度与篇幅要求。
-                # （生成型任务走 GENERATIVE_BLOCK，不要同时注入两套结构约束）
+                # 综述/前沿类任务：小节结构、段落粒度与篇幅要求全部来自 packs
+                # （领域包的 review_outline；缺包时用通用结构）
                 target_chars = int(budget.get("review_target_chars")
                                    or DEFAULT_REVIEW_CHARS)
-                prompt += REVIEW_BLOCK.replace(
-                    "{task_kind}", clean_str(plan.get("task_kind"), "summary")
-                ).replace("{target_chars}", str(target_chars))
+                prompt += render_review_block(plan, target_chars,
+                                              state.get("request") or "")
             try:
                 raw, call_diag = invoke_with_timeout(
                     model, prompt,

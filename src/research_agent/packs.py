@@ -355,6 +355,49 @@ def hyperedge_quota(domain_kind: str = "") -> dict[str, int]:
     return dict(extraction_schema(domain_kind).get("hyperedge_quota") or {})
 
 
+# ------------------------------------------------------------- 写作结构
+
+REVIEW_SKILL_ID = "review-outline"
+_REVIEW_OVERRIDE_FIELDS = ("sections", "sections_en")
+
+
+def review_outline(domain_kind: str = "", language: str = "") -> dict[str, Any]:
+    """综述写作结构：基础技能包 + 领域包 ``review_outline``。
+
+    ``sections`` / ``sections_en`` 领域声明即覆盖（结构是学科性的）；
+    其它标量字段按 key 覆盖；``language`` 显式传入时优先。
+    """
+    base = skill_data(REVIEW_SKILL_ID)
+    if not base:
+        warn_once("review-outline-missing",
+                  "未找到技能包 %s（综述结构将为空）", REVIEW_SKILL_ID)
+    out: dict[str, Any] = dict(base)
+    domain = domain_data(domain_kind) if domain_kind else {}
+    extra = domain.get("review_outline")
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            if key in _REVIEW_OVERRIDE_FIELDS:
+                if value:
+                    out[key] = list(value)
+            elif value not in (None, "", [], {}):
+                out[key] = value
+    lang = str(language or out.get("language") or "zh").strip().lower()
+    out["language"] = "en" if lang.startswith("en") else "zh"
+    out["sections"] = list(out.get("sections_en") or []) if out["language"] == "en" \
+        else list(out.get("sections") or [])
+    out["sections_en"] = list(base.get("sections_en") or [])
+    out["sections_zh"] = list(out.get("sections_zh")
+                              or base.get("sections") or [])
+    out["abstract_hint"] = str(
+        out.get("abstract_hint_en") if out["language"] == "en"
+        else out.get("abstract_hint") or "")
+    out["terminology_note"] = str(
+        out.get("terminology_note_en") if out["language"] == "en"
+        else out.get("terminology_note") or "")
+    out["domain_kind"] = domain_kind or ""
+    return out
+
+
 def _domain_vocab(domain_kind: str, name: str) -> list[dict[str, Any]]:
     key = (f"domain-{name}", domain_kind)
     if key in _cache:

@@ -760,6 +760,22 @@ def _measure_rows(items: Any) -> list[dict[str, Any]]:
     return [x for x in (items or []) if isinstance(x, dict)]
 
 
+def _strip_unit_suffix(name: str, unit: Any) -> str:
+    """去掉键名里被模型顺手抄进去的单位后缀。
+
+    提示词里的键与单位是分开的，但模型常写成 ``dfr(log2)``、``n(bits)``：
+    当括号内容与 unit 一致时视为同一件事，按键名归一，避免同一指标被拆成两套。
+    """
+    text = str(name or "").strip()
+    unit_text = str(unit or "").strip()
+    if not text or not unit_text:
+        return text
+    for suffix in (f"({unit_text})", f"[{unit_text}]", f"（{unit_text}）"):
+        if text.lower().endswith(suffix.lower()):
+            return text[: -len(suffix)].strip()
+    return text
+
+
 def _resolve_hyperedge_member(conn: sqlite3.Connection,
                               member: dict[str, Any]) -> int | None:
     if member.get("node_id") is not None:
@@ -842,6 +858,13 @@ def upsert_hyperedge(conn: sqlite3.Connection, *, hyperedge_type: str,
         })
     condition_rows = _condition_rows(conditions)
     measurement_rows = _measure_rows(measurements)
+    # 键名归一：把模型抄进键名里的单位后缀去掉（dfr(log2) -> dfr）
+    for row_ in condition_rows:
+        row_["key"] = _strip_unit_suffix(
+            row_.get("key") or row_.get("condition_key") or "", row_.get("unit"))
+    for row_ in measurement_rows:
+        row_["metric"] = _strip_unit_suffix(
+            row_.get("metric") or "", row_.get("unit"))
     evidence_rows = []
     for item in provenance or []:
         if isinstance(item, dict):

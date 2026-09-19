@@ -166,6 +166,45 @@
     ["vulnerable_to", "易受…攻击"],
     ["provably_secure_under", "在…下可证明安全"]
   ],
+  "review_outline": {
+    "sections": [
+      "摘要",
+      "引言",
+      "基于编码的密码学背景与研究脉络",
+      "HQC：构造、编解码与参数集",
+      "安全性归约与困难性假设",
+      "密码分析：ISD 族攻击与解码失败攻击",
+      "实现、侧信道与常数时间",
+      "标准化与部署迁移",
+      "性能与代价对比",
+      "挑战与开放问题",
+      "结论"
+    ],
+    "sections_en": [
+      "Abstract",
+      "Introduction",
+      "Background and Research Landscape of Code-Based Cryptography",
+      "HQC: Construction, Encoding/Decoding and Parameter Sets",
+      "Security Reductions and Hardness Assumptions",
+      "Cryptanalysis: ISD-family and Decoding-Failure Attacks",
+      "Implementations, Side Channels and Constant-Time Engineering",
+      "Standardization and Migration",
+      "Performance and Cost Comparison",
+      "Challenges and Open Problems",
+      "Conclusion"
+    ],
+    "terminology_note": "保留方案名、码族名、攻击名与标准的英文原名（如 HQC、QC-MDPC、BIKE、Classic McEliece、ISD、DFR、NIST PQC），首次出现给出全称与缩写。",
+    "terminology_note_en": "Keep scheme, code-family, attack and standard names in English (HQC, QC-MDPC, BIKE, Classic McEliece, ISD, DFR, NIST PQC) and expand abbreviations at first use.",
+    "section_min_chars": 300,
+    "review_target_chars": 8000
+  },
+  "corpus_filter": {
+    "note": "语料硬门：每个分组都至少要命中一个词，才算本领域文献（避免'mechanism/lattice'等同名词把机械工程或格密码论文带进来）。",
+    "groups_all": [
+      ["code-based", "coding-based", "hqc", "hamming quasi-cyclic", "mceliece", "niederreiter", "goppa", "qc-mdpc", "mdpc", "qc-ldpc", "quasi-cyclic", "syndrome decoding", "information set decoding", "bit-flipping", "bit flipping", "parity-check", "parity check", "error-correcting code", "error correcting code", "ldpc", "codeword", "code-based kem", "bike", "ledacrypt", "reed-muller", "reed-solomon", "decoding failure", "dfr", "decoder"],
+      ["cryptograph", "crypto", "kem", "key encapsulation", "encrypt", "decrypt", "public-key", "public key", "post-quantum", "pqc", "ciphertext", "cryptanalysis", "nist", "security", "attack", "signature", "side-channel", "side channel"]
+    ]
+  },
   "extraction_schema": {
     "note": "本领域把'机制'解释为归约路径与解码/攻击路径；'条件'是安全与参数设定，'测量'是复杂度与规模指标。",
     "entity_types": [

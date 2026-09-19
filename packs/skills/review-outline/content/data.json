@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "note": "综述/前沿类写作结构模板。领域包在 domain.json 的 review_outline 中覆盖小节与术语说明；代码只负责排版。",
+  "language": "zh",
+  "sections": [
+    "摘要",
+    "引言",
+    "研究现状与主要脉络",
+    "关键方法与技术路线",
+    "性能、代价与对比",
+    "代表性工作与应用",
+    "挑战与开放问题",
+    "结论"
+  ],
+  "sections_en": [
+    "Abstract",
+    "Introduction",
+    "Background and Research Landscape",
+    "Key Methods and Technical Routes",
+    "Performance, Cost and Comparison",
+    "Representative Works and Applications",
+    "Challenges and Open Problems",
+    "Conclusion"
+  ],
+  "abstract_hint": "摘要写成一段连贯文字（200-300 字），不要分点。",
+  "abstract_hint_en": "Write the abstract as one coherent paragraph (150-250 words), not bullet points.",
+  "terminology_note": "领域专有名词保留英文原名（首次出现给出全称与缩写）。",
+  "terminology_note_en": "Keep standard technical terms in English; expand abbreviations at first use.",
+  "section_min_chars": 200,
+  "review_target_chars": 4000
+}
